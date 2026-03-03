@@ -1,4 +1,9 @@
-# OpenClip
+
+
+<p align="center">
+  <img src="./logo.png" alt="OpenClip" width="350"/>
+</p>
+
 
 [English](./README_EN.md) | 简体中文
 

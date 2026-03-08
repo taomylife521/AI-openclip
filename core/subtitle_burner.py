@@ -38,8 +38,8 @@ _SPEAKER_TAG_RE = re.compile(r"^\[.*?\]\s*(?:>>\s*)?", re.UNICODE)
 
 
 # ASS subtitle header — two styles:
-#   Original:    bottom center (Alignment=2), 30px margin from bottom  — white
-#   Translation: bottom center (Alignment=2), 80px margin from bottom  — yellow
+#   Original:    bottom center (Alignment=2), 50px margin from bottom  — white, 80px font
+#   Translation: bottom center (Alignment=2), 150px margin from bottom — yellow, 80px font
 ASS_HEADER = """\
 [Script Info]
 ScriptType: v4.00+
@@ -49,8 +49,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Original,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1
-Style: Translation,Arial,60,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,80,1
+Style: Original,Arial,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,50,1
+Style: Translation,Arial,80,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -79,7 +79,7 @@ class SubtitleBurner:
 
     def burn_subtitles_for_clips(
         self, clips_dir, output_dir, subtitle_translation: str = None,
-        clip_filenames=None,
+        clip_filenames=None, clip_titles: dict = None,
     ) -> dict:
         """
         Process MP4+SRT pairs in clips_dir and write subtitle-burned
@@ -92,6 +92,8 @@ class SubtitleBurner:
                 the SRT to that language and burn both tracks. Requires api_key.
             clip_filenames: If provided, only process these filenames (scopes
                 processing to the current run's clips).
+            clip_titles: Optional dict mapping filename → display title. When
+                provided, used instead of deriving the title from the filename.
 
         Returns a summary dict with success, total_clips, successful_clips,
         failed_clips, and output_dir.
@@ -121,10 +123,8 @@ class SubtitleBurner:
                 mp4, srt, output_dir / mp4.name, subtitle_translation
             )
             if ok:
-                processed_clips.append({
-                    "filename": mp4.name,
-                    "title": mp4.stem.replace("_", " "),
-                })
+                title = (clip_titles or {}).get(mp4.name) or mp4.stem.replace("_", " ")
+                processed_clips.append({"filename": mp4.name, "title": title})
 
         successful = len(processed_clips)
         logger.info(f"  Subtitle burning complete: {successful}/{total} clips")
@@ -257,7 +257,14 @@ class SubtitleBurner:
 
     def _generate_ass(self, segments: list, translated: list = None) -> str:
         """Build full ASS file content. Includes translation track if provided."""
-        lines = [ASS_HEADER]
+        header = ASS_HEADER
+        if not translated:
+            # No translation track: use yellow and raise to where Translation would sit
+            header = header.replace(
+                "Style: Original,Arial,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,50,1",
+                "Style: Original,Arial,80,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,150,1",
+            )
+        lines = [header]
         for i, seg in enumerate(segments):
             start = self._srt_time_to_ass(seg["start"])
             end = self._srt_time_to_ass(seg["end"])

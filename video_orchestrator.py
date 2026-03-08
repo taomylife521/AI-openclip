@@ -470,14 +470,14 @@ class VideoOrchestrator:
                         logger.info(f"   {successful}/{total} clips post-processed (title + subtitles)")
 
                     elif has_subtitles:
-                        _current_clips = [
-                            c['filename'] for c in clip_result.get('clips_info', [])
-                            if c.get('filename')
-                        ] or None
+                        _clips_info = clip_result.get('clips_info', [])
+                        _current_clips = [c['filename'] for c in _clips_info if c.get('filename')] or None
+                        _clip_titles = {c['filename']: c['title'] for c in _clips_info if c.get('filename') and c.get('title')}
                         subtitle_result = self.subtitle_burner.burn_subtitles_for_clips(
                             str(source_clips_dir), str(video_clips_post_processed_dir),
                             subtitle_translation=self.subtitle_translation,
                             clip_filenames=_current_clips,
+                            clip_titles=_clip_titles,
                         )
                         result.post_processing = subtitle_result
 

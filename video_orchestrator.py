@@ -427,18 +427,21 @@ class VideoOrchestrator:
 
                     if has_titles and has_subtitles:
                         # Single ffmpeg pass: title overlay + subtitle burn per clip
-                        import json as _json
-                        with open(engaging_result['aggregated_file'], 'r', encoding='utf-8') as f:
-                            _analysis = _json.load(f)
+                        # Build filename→title map directly from clip_result
                         _title_map = {
-                            self.title_adder._sanitize_filename(m['title']): m['title']
-                            for m in _analysis.get('top_engaging_moments', [])
+                            c['filename']: c['title']
+                            for c in clip_result.get('clips_info', [])
+                            if c.get('filename') and c.get('title')
                         }
+                        _current_clips = list(_title_map.keys())
                         ass_tmp_dir = video_clips_post_processed_dir / "_ass_tmp"
                         ass_tmp_dir.mkdir(exist_ok=True)
                         successful = 0
                         total = 0
-                        for mp4 in sorted(source_clips_dir.glob("*.mp4")):
+                        for mp4 in sorted(
+                            source_clips_dir / name for name in _current_clips
+                            if (source_clips_dir / name).exists()
+                        ):
                             total += 1
                             srt = mp4.with_suffix(".srt")
                             ass_path = ass_tmp_dir / mp4.with_suffix(".ass").name
@@ -447,10 +450,7 @@ class VideoOrchestrator:
                                     srt, ass_path,
                                     subtitle_translation=self.subtitle_translation,
                                 )
-                            # Derive title from filename (rank_NN_<safe_title>.mp4)
-                            stem_parts = mp4.stem.split("_", 2)
-                            safe_title = stem_parts[2] if len(stem_parts) > 2 else mp4.stem
-                            clip_title = _title_map.get(safe_title, safe_title.replace("_", " "))
+                            clip_title = _title_map.get(mp4.name, mp4.stem.replace("_", " "))
                             out = video_clips_post_processed_dir / mp4.name
                             ok = self.title_adder._add_artistic_title(
                                 str(mp4), clip_title, str(out),
@@ -470,9 +470,14 @@ class VideoOrchestrator:
                         logger.info(f"   {successful}/{total} clips post-processed (title + subtitles)")
 
                     elif has_subtitles:
+                        _current_clips = [
+                            c['filename'] for c in clip_result.get('clips_info', [])
+                            if c.get('filename')
+                        ] or None
                         subtitle_result = self.subtitle_burner.burn_subtitles_for_clips(
                             str(source_clips_dir), str(video_clips_post_processed_dir),
                             subtitle_translation=self.subtitle_translation,
+                            clip_filenames=_current_clips,
                         )
                         result.post_processing = subtitle_result
 

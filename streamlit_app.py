@@ -111,8 +111,8 @@ TRANSLATIONS = {
         'burn_subtitles': 'Burn Subtitles into Clips',
         'burn_subtitles_help': 'Hard-burn SRT subtitles into clip videos (requires ffmpeg with libass)',
         'subtitle_translation': 'Subtitle Translation Language (optional)',
-        'subtitle_translation_help': 'Translate subtitles to this language and burn bilingual subtitles (e.g. "Simplified Chinese"). Leave blank for original language only.',
-        'subtitle_translation_placeholder': 'e.g. Simplified Chinese',
+        'subtitle_translation_help': 'Translate subtitles to this language and burn bilingual subtitles. Select "None" for original language only.',
+        'subtitle_translation_none': 'None',
         'generate_cover_help': 'Generate cover image for the video',
         'use_background_help': 'Use background information from prompts/background/background.md',
         'use_custom_prompt_help': 'Use custom prompt for highlight analysis',
@@ -197,16 +197,16 @@ TRANSLATIONS = {
         'burn_subtitles': '将字幕烧录到片段中',
         'burn_subtitles_help': '将 SRT 字幕硬烧到剪辑视频中（需要带 libass 的 ffmpeg）',
         'subtitle_translation': '字幕翻译语言（可选）',
-        'subtitle_translation_help': '将字幕翻译为该语言并烧录双语字幕（如 "Simplified Chinese"）。留空则仅烧录原语言字幕。',
-        'subtitle_translation_placeholder': '例如：Simplified Chinese',
+        'subtitle_translation_help': '将字幕翻译为该语言并烧录双语字幕。选择"无"则仅烧录原语言字幕。',
+        'subtitle_translation_none': '无',
         'generate_cover_help': '为视频生成封面图像',
         'use_background_help': '使用 prompts/background/background.md 中的背景信息',
         'use_custom_prompt_help': '使用自定义提示进行高光分析',
         'advanced_config_notice': '如需调整高级选项（如视频分割时长、Whisper 模型），请编辑 `core/config.py`。',
         'speaker_references': '说话人参考音频目录（预览版）',
         'speaker_references_help': '包含参考音频片段的目录，用于说话人姓名映射。文件名即说话人姓名（如 references/Host.wav → "Host"）。需要设置 HUGGINGFACE_TOKEN 环境变量。',
-        'speaker_references_unavailable': '说话人识别（预览版）— 需要额外依赖：`uv sync --extra speakers`',
-        'speaker_references_dir_not_found': '⚠️ 目录不存在，请检查路径。',
+        'speaker_references_unavailable': '说话人识���（预览版）— 需要额外依赖：`uv sync --extra speakers`',
+        'speaker_references_dir_not_found': '⚠️ 目录不存在，��检查���径。',
         'speaker_references_token_warning': '⚠️ 未设置 HUGGINGFACE_TOKEN，运行时说话人识别将失败。',
     }
 }
@@ -221,7 +221,7 @@ DEFAULT_DATA = {
     'max_clips': MAX_CLIPS,
     'add_titles': False,
     'burn_subtitles': False,
-    'subtitle_translation': '',
+    'subtitle_translation': None,
     'generate_cover': True,
     # Other form elements
     'input_type': "Video URL",
@@ -376,19 +376,28 @@ def display_results(result):
         if getattr(result, 'post_processing', None) and result.post_processing.get('success'):
             titles = result.post_processing
             with st.expander("✨ Post-Processed Clips"):
-                st.write(f"Added titles to {titles.get('total_clips', 0)} clips")
+                st.write(f"Post-processed {titles.get('total_clips', 0)} clips")
+                post_dir = Path(titles.get('output_dir', ''))
                 if titles.get('processed_clips'):
-                    output_dir = Path(titles.get('output_dir', ''))
-                    # Create columns for side-by-side display (2 per row) with minimal gap
+                    clips_to_show = [
+                        (post_dir / c['filename'], c.get('title', 'Untitled'))
+                        for c in titles['processed_clips']
+                        if c.get('filename')
+                    ]
+                elif post_dir.exists():
+                    # subtitle-only or combined path: no processed_clips, list dir instead
+                    clips_to_show = sorted(
+                        [(p, p.stem) for p in post_dir.glob('*.mp4') if not p.name.startswith('_')]
+                    )
+                else:
+                    clips_to_show = []
+                if clips_to_show:
                     cols = st.columns(2, gap="xxsmall")
-                    for i, clip in enumerate(titles['processed_clips']):
-                        clip_filename = clip.get('filename')
-                        if clip_filename:
-                            clip_path = output_dir / clip_filename
-                            if clip_path.exists():
-                                with cols[i % 2]:
-                                    st.video(str(clip_path), width=450)
-                                    st.caption(f"**{clip.get('title', 'Untitled')}**")
+                    for i, (clip_path, clip_title) in enumerate(clips_to_show):
+                        if clip_path.exists():
+                            with cols[i % 2]:
+                                st.video(str(clip_path), width=450)
+                                st.caption(f"**{clip_title}**")
         
         # Display cover info
         if result.cover_generation and result.cover_generation.get('success'):
@@ -634,14 +643,6 @@ with st.sidebar:
     )
     data['generate_cover'] = generate_cover
     
-    add_titles = st.checkbox(
-        t['add_titles'],
-        value=data['add_titles'],
-        help=t['add_titles_help'],
-        key=f"add_titles_{st.session_state.reset_counter}"
-    )
-    data['add_titles'] = add_titles
-
     burn_subtitles = st.checkbox(
         t['burn_subtitles'],
         value=data.get('burn_subtitles', False),
@@ -651,17 +652,31 @@ with st.sidebar:
     data['burn_subtitles'] = burn_subtitles
 
     if burn_subtitles:
-        subtitle_translation = st.text_input(
+        # Map display labels to API values
+        subtitle_lang_options = [t['subtitle_translation_none'], '中文', 'English']
+        subtitle_lang_values = [None, 'Simplified Chinese', 'English']
+        current_val = data.get('subtitle_translation', None)
+        current_idx = subtitle_lang_values.index(current_val) if current_val in subtitle_lang_values else 0
+        subtitle_lang_label = st.selectbox(
             t['subtitle_translation'],
-            value=data.get('subtitle_translation', ''),
+            options=subtitle_lang_options,
+            index=current_idx,
             help=t['subtitle_translation_help'],
-            placeholder=t['subtitle_translation_placeholder'],
             key=f"subtitle_translation_{st.session_state.reset_counter}"
         )
+        subtitle_translation = subtitle_lang_values[subtitle_lang_options.index(subtitle_lang_label)]
         data['subtitle_translation'] = subtitle_translation
     else:
-        subtitle_translation = ''
-        data['subtitle_translation'] = ''
+        subtitle_translation = None
+        data['subtitle_translation'] = None
+
+    add_titles = st.checkbox(
+        t['add_titles'],
+        value=data['add_titles'],
+        help=t['add_titles_help'],
+        key=f"add_titles_{st.session_state.reset_counter}"
+    )
+    data['add_titles'] = add_titles
 
     use_background = st.checkbox(
         t['use_background'],

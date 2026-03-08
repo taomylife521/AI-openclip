@@ -3,9 +3,12 @@ Qwen API Client - Sample implementation for interacting with Qwen API
 """
 
 import json
+import logging
 import requests
 from typing import Dict, List, Optional, Any
 import os
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 
 from core.config import LLM_CONFIG, API_KEY_ENV_VARS
@@ -51,20 +54,26 @@ class QwenAPIClient:
         # Use legacy endpoint for old models
         url = self.legacy_base_url if self._is_legacy_model(model) else self.base_url
         
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=120)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            # Log the full error response for debugging
-            error_detail = ""
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
             try:
-                error_detail = response.json()
-            except:
-                error_detail = response.text
-            raise Exception(f"API request failed: {e}\nResponse: {error_detail}")
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"API request failed: {e}")
+                response = requests.post(url, headers=headers, json=payload, timeout=180)
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.Timeout as e:
+                if attempt < max_attempts:
+                    logger.warning(f"API request timed out (attempt {attempt}/{max_attempts}), retrying...")
+                    continue
+                raise Exception(f"API request failed: {e}")
+            except requests.exceptions.HTTPError as e:
+                error_detail = ""
+                try:
+                    error_detail = response.json()
+                except:
+                    error_detail = response.text
+                raise Exception(f"API request failed: {e}\nResponse: {error_detail}")
+            except requests.exceptions.RequestException as e:
+                raise Exception(f"API request failed: {e}")
     
     def chat_completion(
         self,

@@ -3,9 +3,12 @@ OpenRouter API Client - Implementation for interacting with OpenRouter API
 """
 
 import json
+import logging
 import requests
 from typing import Dict, List, Optional, Any
 import os
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 
 from core.config import LLM_CONFIG, API_KEY_ENV_VARS
@@ -42,12 +45,19 @@ class OpenRouterAPIClient:
             "Content-Type": "application/json"
         }
         
-        try:
-            response = requests.post(self.base_url, headers=headers, json=payload)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"API request failed: {e}")
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(self.base_url, headers=headers, json=payload, timeout=180)
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.Timeout as e:
+                if attempt < max_attempts:
+                    logger.warning(f"API request timed out (attempt {attempt}/{max_attempts}), retrying...")
+                    continue
+                raise Exception(f"API request failed: {e}")
+            except requests.exceptions.RequestException as e:
+                raise Exception(f"API request failed: {e}")
     
     def chat_completion(
         self,

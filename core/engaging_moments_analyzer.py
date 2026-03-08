@@ -597,7 +597,9 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                video_part = data.get('video_part', 'unknown')
                 for moment in data.get('engaging_moments', []):
+                    moment['_source_video_part'] = video_part
                     all_moments.append(moment)
             except Exception as e:
                 logger.error(f"Error loading highlights file {file_path}: {e}")
@@ -898,11 +900,18 @@ Moment {i}:
 
         # Take first N moments (no sorting - LLM should have already ranked them)
         top_moments = all_moments[:self.max_clips]
-        
-        # Add ranking if not present
+
+        # Add ranking and ensure timing wrapper expected by clip_generator
         for i, moment in enumerate(top_moments):
             if 'rank' not in moment:
                 moment['rank'] = i + 1
+            if 'timing' not in moment:
+                moment['timing'] = {
+                    'video_part': moment.pop('_source_video_part', 'unknown'),
+                    'start_time': moment.get('start_time', '00:00:00'),
+                    'end_time': moment.get('end_time', '00:00:00'),
+                    'duration': f"{moment.get('duration_seconds', 0)}s",
+                }
         
         return {
             "top_engaging_moments": top_moments,

@@ -78,10 +78,11 @@ class SubtitleBurner:
     # ------------------------------------------------------------------
 
     def burn_subtitles_for_clips(
-        self, clips_dir, output_dir, subtitle_translation: str = None
+        self, clips_dir, output_dir, subtitle_translation: str = None,
+        clip_filenames=None,
     ) -> dict:
         """
-        Process all MP4+SRT pairs in clips_dir and write subtitle-burned
+        Process MP4+SRT pairs in clips_dir and write subtitle-burned
         versions to output_dir.
 
         Args:
@@ -89,6 +90,8 @@ class SubtitleBurner:
             output_dir: Directory to write burned clips to.
             subtitle_translation: If set (e.g. "Simplified Chinese"), translate
                 the SRT to that language and burn both tracks. Requires api_key.
+            clip_filenames: If provided, only process these filenames (scopes
+                processing to the current run's clips).
 
         Returns a summary dict with success, total_clips, successful_clips,
         failed_clips, and output_dir.
@@ -97,26 +100,41 @@ class SubtitleBurner:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        results = []
-        for mp4 in sorted(clips_dir.glob("*.mp4")):
+        if clip_filenames is not None:
+            mp4_files = sorted(
+                clips_dir / name for name in clip_filenames
+                if (clips_dir / name).exists()
+            )
+        else:
+            mp4_files = sorted(clips_dir.glob("*.mp4"))
+
+        processed_clips = []
+        total = 0
+        for mp4 in mp4_files:
             srt = mp4.with_suffix(".srt")
             if not srt.exists():
                 logger.warning(f"No SRT for {mp4.name}, skipping subtitle burn")
                 continue
+            total += 1
             logger.info(f"  Burning subtitles: {mp4.name}")
             ok = self._process_clip(
                 mp4, srt, output_dir / mp4.name, subtitle_translation
             )
-            results.append(ok)
+            if ok:
+                processed_clips.append({
+                    "filename": mp4.name,
+                    "title": mp4.stem.replace("_", " "),
+                })
 
-        successful = sum(results)
-        logger.info(f"  Subtitle burning complete: {successful}/{len(results)} clips")
+        successful = len(processed_clips)
+        logger.info(f"  Subtitle burning complete: {successful}/{total} clips")
         return {
-            "success": True,
+            "success": successful > 0,
             "output_dir": str(output_dir),
-            "total_clips": len(results),
+            "total_clips": total,
             "successful_clips": successful,
-            "failed_clips": len(results) - successful,
+            "failed_clips": total - successful,
+            "processed_clips": processed_clips,
         }
 
     def prepare_ass_for_clip(
@@ -201,10 +219,16 @@ class SubtitleBurner:
             f"{i}\n{seg['start']} --> {seg['end']}\n{seg['text']}"
             for i, seg in enumerate(segments, 1)
         )
+        n = len(segments)
         prompt = (
-            f"Translate this SRT subtitle file to {target_lang}.\n"
-            "Return ONLY the translated SRT in the exact same format.\n"
-            "Keep all line numbers and timestamps unchanged. Only translate the text lines.\n\n"
+            f"Translate the following SRT subtitle file to {target_lang}.\n"
+            f"The input contains exactly {n} numbered subtitle blocks.\n"
+            f"Your response MUST contain exactly {n} numbered subtitle blocks — no more, no less.\n"
+            "Rules:\n"
+            "- Keep every line number and timestamp exactly as-is.\n"
+            "- Each input block maps to exactly one output block (do NOT merge or split blocks).\n"
+            "- Each block must have exactly one text line (the translation); do NOT add blank lines inside a block.\n"
+            "- Return ONLY the translated SRT. No extra commentary, no markdown fences.\n\n"
             + srt_text
         )
         try:

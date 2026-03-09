@@ -1,6 +1,6 @@
 ---
 name: "video_highlights_processor"
-description: "Processes videos to identify engaging moments, generate transcripts, and create highlight clips with artistic titles and custom cover images. Use when user needs to: extract highlights from long videos or livestreams, clip or cut best moments from videos, process Bilibili/YouTube URLs or local video files, generate transcripts via Whisper, analyze content for engaging moments, create short-form clips with styled titles and covers, adjust cover text position and colors, or find and export memorable scenes from recordings."
+description: "Processes videos to identify engaging moments, generate transcripts, and create highlight clips with artistic titles and custom cover images. Use when user needs to: extract highlights from long videos or livestreams, clip or cut best moments from videos, process Bilibili/YouTube URLs or local video files, generate transcripts via Whisper, analyze content for engaging moments, create short-form clips with styled titles and covers, adjust cover text position and colors, find and export memorable scenes from recordings, burn subtitles into clips (with optional translation), guide clip selection with user intent, or identify speakers in multi-person conversations."
 ---
 
 # Video Highlights Processor Skill
@@ -42,6 +42,9 @@ For local files with existing subtitles, place the `.srt` file in the same direc
 | `--cover-outline-color <color>` | `black` | Cover text outline color: `yellow`, `red`, `white`, `cyan`, `green`, `orange`, `pink`, `purple`, `gold`, `silver`, `black` |
 | `--language <lang>` | `zh` | Output language: `zh` (Chinese), `en` (English) |
 | `--llm-provider <provider>` | `qwen` | LLM provider: `qwen`, `openrouter` |
+| `--user-intent <text>` | — | Free-text focus description (e.g. "moments about AI risks"). Steers LLM clip selection toward this topic |
+| `--subtitle-translation <lang>` | — | Translate subtitles to this language before burning (e.g. `"Simplified Chinese"`). Requires `--burn-subtitles` and `QWEN_API_KEY` |
+| `--speaker-references <dir>` | — | Directory of reference WAV files (one per speaker, filename = speaker name) for speaker diarization. Requires `uv sync --extra speakers` and `HUGGINGFACE_TOKEN` |
 | `-f`, `--filename <template>` | — | yt-dlp template: `%(title)s`, `%(uploader)s`, `%(id)s`, etc. |
 
 ### Flags
@@ -50,11 +53,13 @@ For local files with existing subtitles, place the `.srt` file in the same direc
 |---|---|
 | `--force-whisper` | Ignore platform subtitles, use Whisper |
 | `--skip-download` | Use existing downloaded video |
+| `--skip-transcript` | Skip transcript generation, use existing transcript file |
 | `--skip-analysis` | Skip analysis, use existing analysis file for clip generation |
 | `--use-background` | Include background info (streamer names/nicknames) in analysis prompts |
 | `--skip-clips` | Skip clip generation |
 | `--add-titles` | Add artistic titles to clips (disabled by default) |
 | `--skip-cover` | Skip cover image generation |
+| `--burn-subtitles` | Burn SRT subtitles into video. Output goes to `clips_post_processed/`. Requires ffmpeg with libass |
 | `-v`, `--verbose` | Enable verbose logging |
 | `--debug` | Export full prompts sent to LLM (saved to `debug_prompts/`) |
 
@@ -89,10 +94,11 @@ Use `--skip-clips`, `--skip-cover` to skip specific steps. Use `--add-titles` to
 
 ```
 processed_videos/{video_name}/
-├── downloads/            # Original video, subtitles, and metadata
-├── splits/               # Split parts and AI analysis results
-├── clips/                # Generated highlight clips and summary
-└── clips_with_titles/    # Final clips with artistic titles and cover images
+├── downloads/              # Original video, subtitles, and metadata
+├── splits/                 # Split parts and AI analysis results
+├── clips/                  # Generated highlight clips and summary
+├── clips_with_titles/      # Final clips with artistic titles and cover images
+└── clips_post_processed/   # Subtitle-burned clips (only when --burn-subtitles used)
 ```
 
 ## Option Selection Guide
@@ -106,6 +112,12 @@ processed_videos/{video_name}/
 **`--max-duration`** — Default 20 min works for most videos. Decrease to 10-15 for very long livestreams (2+ hours) to keep segments manageable. Increase to 30-40 for shorter content to avoid unnecessary splits. Splitting happens at subtitle boundaries to preserve coherence.
 
 **Multi-part analysis** — Videos that get split are analyzed per-segment, then aggregated to the top 5 engaging moments across all segments.
+
+**`--user-intent`** — Steers LLM clip selection at both the per-segment and cross-segment aggregation stages. Useful when you want to find clips about a specific topic (e.g. "AI safety predictions", "funny moments").
+
+**`--burn-subtitles`** — Hardcodes the SRT subtitle into the video frame. Use when you want subtitles always visible (e.g. for social media). Combine with `--subtitle-translation` to add a translated subtitle track below the original.
+
+**`--speaker-references`** — Enables speaker diarization for interviews/podcasts. Provide a directory of 10–30 second clean WAV clips (one per speaker), named after the speaker (e.g. `references/Host.wav`).
 
 ## Troubleshooting
 

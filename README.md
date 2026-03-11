@@ -17,6 +17,8 @@
 
 ## 📢 最新动态
 
+- **2026-03-11**:
+  - OpenClip 现已上架 [skills.sh](https://skills.sh/linzzzzzz/openclip)，可通过 `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` 在任意目录安装为 Agent Skill，并让 Agent 调用
 - **2026-03-08**:
   - 新增 `--user-intent` 参数 — 用自然语言告诉 AI 你在找什么（如 `--user-intent "关于 AI 风险的观点"`），LLM 在片段筛选和排名时会优先考虑相关内容
 - **2026-03-04**:

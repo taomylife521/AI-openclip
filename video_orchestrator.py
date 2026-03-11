@@ -237,7 +237,15 @@ class VideoOrchestrator:
             
             # Check if source is a local file or URL
             is_local_file = await self._is_local_video_file(source)
-            
+
+            if not is_local_file and not source.startswith(('http://', 'https://', 'ftp://')):
+                raise FileNotFoundError(
+                    f"Local file not found: {source}\n"
+                    f"Tip: filenames with special characters (e.g. curly apostrophes like \u2018\u2019) "
+                    f"look identical to standard ones but won't match. "
+                    f"Try using shell tab-completion or drag-and-drop to get the exact path."
+                )
+
             if is_local_file:
                 # Step 1: Process local video file
                 logger.info("📁 Step 1: Processing local video file...")

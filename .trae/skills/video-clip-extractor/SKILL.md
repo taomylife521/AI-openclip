@@ -25,7 +25,7 @@ Before running, determine the execution context:
 2. **Global install** — if `~/.local/share/openclip` does not exist, run these steps:
 
 **Prerequisites:** `git` and `uv` must be installed.
-- Install uv if missing: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Install uv if missing: macOS: `brew install uv` · Linux/Windows: `pip install uv`
 
 ```bash
 git clone https://github.com/linzzzzzz/openclip.git ~/.local/share/openclip

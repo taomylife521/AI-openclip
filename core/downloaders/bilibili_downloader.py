@@ -309,6 +309,121 @@ class ImprovedBilibiliDownloader:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=False)
     
+    async def get_multi_part_info(self, url: str) -> List[Dict[str, Any]]:
+        """
+        Get information about all parts of a multi-part Bilibili video
+        
+        Args:
+            url: Bilibili video URL (can be any part of a multi-part video)
+            
+        Returns:
+            List of dictionaries containing part information (index, title, url)
+            Returns empty list if not a multi-part video or on error
+        """
+        if not self.validate_url(url):
+            raise ValueError(f"Invalid Bilibili URL: {url}")
+        
+        # Try multiple strategies to get video info
+        strategies = [
+            self._get_multi_part_with_cookies,
+            self._get_multi_part_without_cookies,
+        ]
+        
+        for i, strategy in enumerate(strategies):
+            try:
+                logger.info(f"Trying multi-part extraction strategy {i+1}/{len(strategies)}")
+                parts = await strategy(url)
+                if parts and len(parts) > 1:
+                    logger.info(f"Found {len(parts)} parts in multi-part video")
+                    return parts
+                elif parts and len(parts) == 1:
+                    logger.info("Single part video detected")
+                    return []
+            except Exception as e:
+                logger.warning(f"Multi-part strategy {i+1} failed: {str(e)}")
+                if i == len(strategies) - 1:
+                    logger.error(f"All multi-part extraction strategies failed")
+                    return []
+                continue
+        
+        return []
+    
+    async def _get_multi_part_with_cookies(self, url: str) -> List[Dict[str, Any]]:
+        """Get multi-part info with cookies"""
+        return await self._get_multi_part_info_sync(url, use_cookies=True)
+    
+    async def _get_multi_part_without_cookies(self, url: str) -> List[Dict[str, Any]]:
+        """Get multi-part info without cookies"""
+        return await self._get_multi_part_info_sync(url, use_cookies=False)
+    
+    async def _get_multi_part_info_sync(self, url: str, use_cookies: bool = True) -> List[Dict[str, Any]]:
+        """
+        Synchronously extract multi-part video information
+        
+        Args:
+            url: Bilibili video URL
+            use_cookies: Whether to use cookies for extraction
+            
+        Returns:
+            List of part information dictionaries
+        """
+        info_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,  # Need full info to get entries
+        }
+        
+        if use_cookies:
+            cookie_opts = self._get_cookie_opts()
+            if cookie_opts:
+                info_opts.update(cookie_opts)
+        
+        loop = asyncio.get_event_loop()
+        
+        def extract():
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        
+        info = await loop.run_in_executor(None, extract)
+        
+        # Check if this is a playlist/multi-part video
+        parts = []
+        
+        # Try to get entries (playlist entries)
+        entries = info.get('entries')
+        if entries:
+            for i, entry in enumerate(entries, 1):
+                if entry:
+                    part_info = {
+                        'index': i,
+                        'title': entry.get('title', f'P{i}'),
+                        'url': entry.get('webpage_url') or entry.get('url') or f"{url}?p={i}",
+                        'duration': entry.get('duration', 0),
+                        'bvid': entry.get('id', ''),
+                    }
+                    parts.append(part_info)
+        
+        # If no entries found but we have playlist_count or n_entries in the info
+        # Try to construct URLs from the original URL
+        if not parts:
+            playlist_count = info.get('playlist_count') or info.get('n_entries')
+            if playlist_count and playlist_count > 1:
+                # Extract BVid from URL
+                bv_match = re.search(r'[Bb][Vv][0-9A-Za-z]+', url)
+                if bv_match:
+                    bvid = bv_match.group(0)
+                    base_url = f"https://www.bilibili.com/video/{bvid}"
+                    for i in range(1, playlist_count + 1):
+                        parts.append({
+                            'index': i,
+                            'title': f'P{i}',
+                            'url': f"{base_url}?p={i}",
+                            'duration': 0,
+                            'bvid': bvid,
+                        })
+        
+        return parts
+    
     async def download_video(
         self, 
         url: str, 

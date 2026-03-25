@@ -18,9 +18,42 @@ from typing import Optional, Dict, Any
 from video_orchestrator import VideoOrchestrator
 from core.config import API_KEY_ENV_VARS, DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, LLM_CONFIG
 from core.transcript_generation_whisperx import WHISPERX_AVAILABLE
+from core.downloaders.bilibili_downloader import ImprovedBilibiliDownloader
 
 # Import job manager for background processing
 from job_manager import get_job_manager, JobStatus
+
+
+def is_bilibili_url(url: str) -> bool:
+    """Check if URL is a Bilibili URL"""
+    if not url:
+        return False
+    bilibili_patterns = [
+        r'https?://(?:www\.)?bilibili\.com/video/[Bb][Vv][0-9A-Za-z]+',
+        r'https?://(?:www\.)?bilibili\.com/bangumi/',
+        r'https?://(?:www\.)?b23\.tv/',
+        r'https?://(?:m\.)?bilibili\.com/video/',
+    ]
+    return any(re.match(pattern, url) for pattern in bilibili_patterns)
+
+
+async def get_bilibili_multi_parts(url: str, browser: Optional[str] = None, cookies_file: Optional[str] = None) -> list:
+    """
+    Get multi-part video information from Bilibili URL
+    
+    Returns:
+        List of part information dicts, empty list if single video or error
+    """
+    try:
+        downloader = ImprovedBilibiliDownloader(
+            browser=browser,
+            cookies=cookies_file
+        )
+        parts = await downloader.get_multi_part_info(url)
+        return parts
+    except Exception as e:
+        st.warning(f"Could not detect multi-part video: {e}")
+        return []
 
 # Set page config
 st.set_page_config(
@@ -1129,21 +1162,55 @@ if process_clicked:
             'user_intent': user_intent or None,
         }
         
-        # Create and start job
-        job_id = job_manager.create_job(video_source, job_options)
-        job_manager.start_job(job_id, process_video_worker)
+        # Check if this is a Bilibili multi-part video
+        created_job_ids = []
+        if is_bilibili_url(video_source):
+            with st.spinner("Checking for multi-part video..."):
+                parts = asyncio.run(get_bilibili_multi_parts(
+                    video_source,
+                    browser=cookie_browser if cookie_mode == 'browser' else None,
+                    cookies_file=(cookies_file or None) if cookie_mode == 'file' else None
+                ))
+            
+            if parts and len(parts) > 1:
+                # Multi-part video detected, create a job for each part
+                st.info(f"📺 Detected multi-part video with {len(parts)} parts. Creating jobs for all parts...")
+                
+                for part in parts:
+                    part_url = part['url']
+                    part_options = job_options.copy()
+                    # Append part info to output dir to keep them separate
+                    part_options['output_dir'] = os.path.join(output_dir, f"P{part['index']}_{part['title'][:30]}")
+                    
+                    job_id = job_manager.create_job(part_url, part_options)
+                    job_manager.start_job(job_id, process_video_worker)
+                    created_job_ids.append(job_id)
+                
+                st.success(f"✅ Created {len(created_job_ids)} jobs for all parts!")
+            else:
+                # Single video, create one job
+                job_id = job_manager.create_job(video_source, job_options)
+                job_manager.start_job(job_id, process_video_worker)
+                created_job_ids.append(job_id)
+                st.success(f"✅ Job started! ID: `{job_id[:8]}...`")
+        else:
+            # Not Bilibili, create single job
+            job_id = job_manager.create_job(video_source, job_options)
+            job_manager.start_job(job_id, process_video_worker)
+            created_job_ids.append(job_id)
+            st.success(f"✅ Job started! ID: `{job_id[:8]}...`")
         
-        # Auto-track this job only if no jobs are currently being tracked
-        if not st.session_state.processing_job_ids:
-            st.session_state.processing_job_ids = [job_id]
+        # Auto-track first job if no jobs are currently being tracked
+        if created_job_ids and not st.session_state.processing_job_ids:
+            st.session_state.processing_job_ids = [created_job_ids[0]]
             st.session_state.processing = True
         
-        st.success(f"✅ Job started! ID: `{job_id[:8]}...`")
-        
         # Show different message based on tracking state
-        if job_id in st.session_state.processing_job_ids:
+        if len(created_job_ids) > 1:
+            st.info(f"💡 {len(created_job_ids)} jobs are running in background. Click 'Watch Progress' in job cards to track them.")
+        elif created_job_ids and created_job_ids[0] in st.session_state.processing_job_ids:
             st.info("💡 This job is being tracked. You can close this page and come back later.")
-        else:
+        elif created_job_ids:
             st.info("💡 Job is running in background. Click 'Watch Progress' in the job card to track it.")
         
         time.sleep(1)

@@ -23,7 +23,8 @@ class ClipGenerator:
     def __init__(self, output_dir: str = "engaging_clips",
                  normalize_boundaries: bool = False,
                  normalize_start_max_shift: float = 5.0,
-                 normalize_end_max_shift: float = 8.0):
+                 normalize_end_max_shift: float = 8.0,
+                 subtitle_gap_boundary_threshold: float = 0.6):
         """
         Initialize clip generator
 
@@ -35,17 +36,21 @@ class ClipGenerator:
                 when normalizing to a subtitle boundary
             normalize_end_max_shift: Maximum seconds to move clip end later when
                 normalizing to a subtitle boundary
+            subtitle_gap_boundary_threshold: Minimum gap between subtitle blocks
+                to treat as a stronger thought boundary when punctuation is weak
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         self.normalize_boundaries = normalize_boundaries
         self.normalize_start_max_shift = normalize_start_max_shift
         self.normalize_end_max_shift = normalize_end_max_shift
+        self.subtitle_gap_boundary_threshold = subtitle_gap_boundary_threshold
         logger.info(f"📁 Clip output directory: {self.output_dir}")
         if self.normalize_boundaries:
             logger.info(
                 "🧭 Boundary normalization: enabled "
-                f"(start <= {normalize_start_max_shift}s back, end <= {normalize_end_max_shift}s forward)"
+                f"(start <= {normalize_start_max_shift}s back, end <= {normalize_end_max_shift}s forward, "
+                f"subtitle gap >= {subtitle_gap_boundary_threshold}s)"
             )
     
     def generate_clips_from_analysis(self, 
@@ -102,13 +107,17 @@ class ClipGenerator:
                 
                 effective_start_time = start_time
                 effective_end_time = end_time
+                normalization_details = {
+                    'start': 'disabled',
+                    'end': 'disabled',
+                }
                 srt_segments = None
                 subtitle_file = self._find_subtitle_file(video_part, subtitle_dir)
                 if subtitle_file and self.normalize_boundaries:
                     srt_segments = self._parse_srt_file(subtitle_file)
 
                 if srt_segments:
-                    effective_start_time, effective_end_time = self._normalize_clip_boundaries(
+                    effective_start_time, effective_end_time, normalization_details = self._normalize_clip_boundaries(
                         start_time,
                         end_time,
                         srt_segments
@@ -150,6 +159,7 @@ class ClipGenerator:
                         'video_part': video_part,
                         'time_range': f"{effective_start_time} - {effective_end_time}",
                         'original_time_range': f"{start_time} - {end_time}",
+                        'normalization_details': normalization_details,
                         'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
                         'why_engaging': moment['why_engaging']
                     })
@@ -365,21 +375,42 @@ class ClipGenerator:
         text = seg.get('text', '').rstrip()
         return bool(text and text[-1] in self.SENTENCE_ENDINGS)
 
+    def _gap_before_segment(self, srt_segments: List[Dict], index: int) -> float:
+        """Return the gap in seconds before the segment at index."""
+        if index <= 0:
+            return 0.0
+        prev_end = self._time_to_seconds_srt(srt_segments[index - 1]['end_time'])
+        cur_start = self._time_to_seconds_srt(srt_segments[index]['start_time'])
+        return max(0.0, cur_start - prev_end)
+
+    def _gap_after_segment(self, srt_segments: List[Dict], index: int) -> float:
+        """Return the gap in seconds after the segment at index."""
+        if index >= len(srt_segments) - 1:
+            return 0.0
+        cur_end = self._time_to_seconds_srt(srt_segments[index]['end_time'])
+        next_start = self._time_to_seconds_srt(srt_segments[index + 1]['start_time'])
+        return max(0.0, next_start - cur_end)
+
     def _is_start_boundary_segment(self, srt_segments: List[Dict], index: int) -> bool:
         """
         Return True when this subtitle segment appears to start a fresh thought.
         We treat a segment as a stronger start candidate when the previous
-        segment ends a sentence or when it is the first subtitle block.
+        segment ends a sentence, when a larger subtitle gap precedes it,
+        or when it is the first subtitle block.
         """
         if index <= 0:
             return True
-        return self._is_sentence_boundary_segment(srt_segments[index - 1])
+        return (
+            self._is_sentence_boundary_segment(srt_segments[index - 1])
+            or self._gap_before_segment(srt_segments, index) >= self.subtitle_gap_boundary_threshold
+        )
 
-    def _find_start_boundary(self, start_time_seconds: float, srt_segments: List[Dict]) -> float:
+    def _find_start_boundary(self, start_time_seconds: float, srt_segments: List[Dict]) -> tuple[float, str]:
         """Snap start backward to a nearby subtitle boundary, preferring sentence starts."""
         lower_limit = max(0.0, start_time_seconds - self.normalize_start_max_shift)
         fallback = None
         strong = None
+        strong_idx = None
 
         for idx, seg in enumerate(srt_segments):
             seg_start = self._time_to_seconds_srt(seg['start_time'])
@@ -391,14 +422,22 @@ class ClipGenerator:
             fallback = seg_start
             if self._is_start_boundary_segment(srt_segments, idx):
                 strong = seg_start
+                strong_idx = idx
 
         if strong is not None and strong != start_time_seconds:
+            gap_before = self._gap_before_segment(srt_segments, strong_idx or 0)
+            reason = (
+                f"subtitle gap {gap_before:.2f}s"
+                if gap_before >= self.subtitle_gap_boundary_threshold
+                else "sentence boundary"
+            )
             logger.info(
                 f"  🔧 Normalized start_time: {self._seconds_to_ffmpeg_time(start_time_seconds)}"
                 f" → {self._seconds_to_ffmpeg_time(strong)}"
                 f" (-{start_time_seconds - strong:.1f}s)"
+                f" | reason: {reason}"
             )
-            return strong
+            return strong, reason
 
         if fallback is not None and fallback != start_time_seconds:
             logger.info(
@@ -407,13 +446,13 @@ class ClipGenerator:
                 f" {self._seconds_to_ffmpeg_time(start_time_seconds)}"
                 f" → {self._seconds_to_ffmpeg_time(fallback)}"
             )
-            return fallback
+            return fallback, "subtitle boundary fallback"
 
-        return start_time_seconds
+        return start_time_seconds, "unchanged"
 
     def _snap_end_time(self, end_time_seconds: float,
                        srt_segments: List[Dict],
-                       max_extension: Optional[float] = None) -> float:
+                       max_extension: Optional[float] = None) -> tuple[float, str]:
         """
         Snap end_time forward to the nearest SRT segment that ends with
         sentence-ending punctuation.
@@ -429,8 +468,9 @@ class ClipGenerator:
         extension = self.normalize_end_max_shift if max_extension is None else max_extension
         limit = end_time_seconds + extension
         nearest_seg_end = None
+        gap_boundary = None
 
-        for seg in srt_segments:
+        for idx, seg in enumerate(srt_segments):
             seg_end = self._time_to_seconds_srt(seg['end_time'])
             if seg_end < end_time_seconds:
                 continue
@@ -448,26 +488,41 @@ class ClipGenerator:
                         f" (+{seg_end - end_time_seconds:.1f}s)"
                         f" | ends with: \"{text[-40:]}\""
                     )
-                return seg_end
+                return seg_end, "sentence boundary"
+            if gap_boundary is None:
+                gap_after = self._gap_after_segment(srt_segments, idx)
+                if gap_after >= self.subtitle_gap_boundary_threshold:
+                    gap_boundary = (seg_end, gap_after)
+
+        if gap_boundary is not None:
+            seg_end, gap_after = gap_boundary
+            if seg_end != end_time_seconds:
+                logger.info(
+                    f"  🔧 Snapped end_time: {self._seconds_to_ffmpeg_time(end_time_seconds)}"
+                    f" → {self._seconds_to_ffmpeg_time(seg_end)}"
+                    f" (+{seg_end - end_time_seconds:.1f}s)"
+                    f" | reason: subtitle gap {gap_after:.2f}s"
+                )
+            return seg_end, "subtitle gap"
 
         # No sentence boundary found — still snap to nearest SRT segment for ms precision
         if nearest_seg_end is not None and nearest_seg_end != end_time_seconds:
             logger.info(
-                f"  ⚠ No sentence boundary within {extension}s,"
+                f"  ⚠ No sentence or gap boundary within {extension}s,"
                 f" snapping to nearest SRT segment for ms precision:"
                 f" {self._seconds_to_ffmpeg_time(end_time_seconds)}"
                 f" → {self._seconds_to_ffmpeg_time(nearest_seg_end)}"
             )
-            return nearest_seg_end
+            return nearest_seg_end, "subtitle boundary fallback"
 
-        return end_time_seconds
+        return end_time_seconds, "unchanged"
 
     def _normalize_clip_boundaries(
         self,
         start_time: str,
         end_time: str,
         srt_segments: List[Dict],
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, Dict[str, str]]:
         """
         Normalize clip boundaries to nearby subtitle boundaries.
 
@@ -480,8 +535,8 @@ class ClipGenerator:
         start_seconds = self._parse_time_flexible(start_time)
         end_seconds = self._parse_time_flexible(end_time)
 
-        normalized_start = self._find_start_boundary(start_seconds, srt_segments)
-        normalized_end = self._snap_end_time(
+        normalized_start, start_reason = self._find_start_boundary(start_seconds, srt_segments)
+        normalized_end, end_reason = self._snap_end_time(
             end_seconds,
             srt_segments,
             max_extension=self.normalize_end_max_shift,
@@ -493,11 +548,18 @@ class ClipGenerator:
                 "⚠ Boundary normalization produced an invalid range; "
                 "falling back to original timestamps"
             )
-            return start_time, end_time
+            return start_time, end_time, {
+                "start": "invalid normalization fallback",
+                "end": "invalid normalization fallback",
+            }
 
         return (
             self._seconds_to_ffmpeg_time(normalized_start),
             self._seconds_to_ffmpeg_time(normalized_end),
+            {
+                "start": start_reason,
+                "end": end_reason,
+            },
         )
 
     def _create_clip(self, input_video: str, start_time: str,

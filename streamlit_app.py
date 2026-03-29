@@ -898,7 +898,7 @@ def process_video_worker(job, progress_callback):
         subtitle_translation=options.get('subtitle_translation') or None,
         mode=options.get('mode', 'engaging_moments'),
         user_intent=options.get('user_intent') or None,
-        normalize_boundaries=options.get('normalize_boundaries', False),
+        normalize_boundaries=options.get('normalize_boundaries', True),
     )
     
     result = asyncio.run(orchestrator.process_video(

@@ -78,7 +78,7 @@ class VideoOrchestrator:
                 burn_subtitles: bool = False,
                 subtitle_translation: str = None,
                 user_intent: Optional[str] = None,
-                normalize_boundaries: bool = False):
+                normalize_boundaries: bool = True):
         """
         Initialize the video orchestrator
 
@@ -1179,9 +1179,11 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
                        help='Free-text description of what you are looking for '
                             '(e.g. "moments about AI risks"). Steers LLM clip selection '
                             'and ranking toward this focus.')
-    parser.add_argument('--normalize-boundaries', action='store_true',
-                       help='Normalize both clip start and end times to nearby subtitle boundaries '
-                            '(experimental)')
+    parser.add_argument('--normalize-boundaries', dest='normalize_boundaries', action='store_true',
+                       help='Normalize both clip start and end times to nearby subtitle boundaries')
+    parser.add_argument('--no-normalize-boundaries', dest='normalize_boundaries', action='store_false',
+                       help='Disable clip boundary normalization')
+    parser.set_defaults(normalize_boundaries=True)
     args = parser.parse_args()
 
     if args.verbose:

@@ -106,6 +106,11 @@ The following are installed automatically when you run `uv sync`:
 - **Whisper** - For speech-to-text transcription
 - Other Python dependencies (moviepy, streamlit, etc.)
 
+Optional extras:
+
+- `uv sync --extra paraformer` - Installs runtime dependencies for local Chinese ASR via Paraformer
+- `uv sync --extra speakers` - Installs WhisperX dependencies for speaker identification
+
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup
@@ -118,6 +123,43 @@ cd openclip
 # Install dependencies with uv
 uv sync
 ```
+
+<a id="paraformer-installation"></a>
+<details>
+<summary>🈶 Enable Paraformer For Local Chinese ASR (Optional)</summary>
+
+If you want local ASR to prefer Paraformer for Chinese audio, complete these extra steps:
+
+```bash
+# 1) Install Paraformer runtime dependencies
+uv sync --extra paraformer
+```
+
+```bash
+# 2) Prepare a compatible Paraformer helper checkout
+# Default location:
+third_party/funasr-paraformer
+```
+
+OpenClip currently expects these two helper scripts under that checkout:
+
+- `tools/transcribe_long_audio.py`
+- `tools/funasr_json_to_srt.py`
+
+If your helper checkout lives elsewhere, point OpenClip to it with:
+
+```bash
+export PARAFORMER_PROJECT_DIR=/path/to/funasr-paraformer
+```
+
+Notes:
+
+- The default path is repo-relative: `third_party/funasr-paraformer`
+- If the helper checkout has its own `.venv`, OpenClip will prefer that interpreter
+- If the helper checkout does not have a `.venv`, OpenClip falls back to the current repo environment created by `uv sync --extra paraformer`
+- If the helper checkout or dependencies are unavailable, OpenClip automatically falls back to Whisper
+
+</details>
 
 ### 2. Set API Key (for AI features)
 

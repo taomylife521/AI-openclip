@@ -14,6 +14,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local Chinese ASR via a compatible FunASR Paraformer helper checkout
+# Install with: uv sync --extra paraformer
+# Runtime also expects a helper project checkout under third_party/funasr-paraformer
+# (or PARAFORMER_PROJECT_DIR) that provides the transcription scripts.
+paraformer = [
+    "funasr>=1.3.0",
+    "modelscope",
+    "soundfile>=0.12.1",
+    "torch",
+    "torchaudio",
+]
+
 # Speaker identification for interview/panel/podcast videos
 # Install with: uv sync --extra speakers
 # Requires: HUGGINGFACE_TOKEN env var + accepted pyannote user agreements

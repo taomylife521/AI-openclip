@@ -11,6 +11,32 @@ def test_availability_error_reports_missing_project_dir(tmp_path):
     assert "Paraformer project dir not found" in processor.availability_error()
 
 
+def test_availability_uses_current_env_when_helper_scripts_exist(tmp_path, monkeypatch):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "transcribe_long_audio.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    (tools_dir / "funasr_json_to_srt.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    processor = ParaformerTranscriptProcessor(project_dir=tmp_path)
+    monkeypatch.setattr(processor, "_missing_current_env_modules", lambda: [])
+
+    assert processor.availability_error() is None
+
+
+def test_availability_error_suggests_paraformer_extra_when_current_env_deps_missing(tmp_path, monkeypatch):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "transcribe_long_audio.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    (tools_dir / "funasr_json_to_srt.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    processor = ParaformerTranscriptProcessor(project_dir=tmp_path)
+    monkeypatch.setattr(processor, "_missing_current_env_modules", lambda: ["funasr", "modelscope"])
+
+    error = processor.availability_error()
+    assert "uv sync --extra paraformer" in error
+    assert "funasr, modelscope" in error
+
+
 def test_find_output_json_prefers_stem_matched_file(tmp_path):
     processor = ParaformerTranscriptProcessor(project_dir=tmp_path)
     expected = tmp_path / "clip.json"

@@ -3,7 +3,11 @@ Configuration file for LLM clients and other components
 """
 
 import os
+from pathlib import Path
 from typing import Dict, Any
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _normalize_chat_completions_url(url: str) -> str:
@@ -101,9 +105,10 @@ WHISPER_MODEL: str = "base"
 TRANSCRIPT_LANGUAGE_DETECT_MODEL: str = os.getenv("TRANSCRIPT_LANGUAGE_DETECT_MODEL", "tiny")
 
 # Local FunASR Paraformer project used for Chinese ASR.
+# Default to a repo-relative vendored checkout so the config is portable.
 PARAFORMER_PROJECT_DIR: str = os.getenv(
     "PARAFORMER_PROJECT_DIR",
-    "/home/tangsipeng/mycode/funasr-paraformer",
+    str(REPO_ROOT / "third_party" / "funasr-paraformer"),
 )
 PARAFORMER_DEVICE: str = os.getenv("PARAFORMER_DEVICE", "auto")
 

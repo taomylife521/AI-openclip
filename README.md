@@ -106,6 +106,11 @@
 - **Whisper** - 用于语音转文字
 - 其他 Python 依赖（moviepy、streamlit 等）
 
+可选 extra：
+
+- `uv sync --extra paraformer` - 安装 Paraformer 中文本地 ASR 运行时依赖
+- `uv sync --extra speakers` - 安装 WhisperX 说话人识别依赖
+
 ## 🚀 快速开始
 
 ### 1. 克隆和设置
@@ -118,6 +123,43 @@ cd openclip
 # 使用 uv 安装依赖
 uv sync
 ```
+
+<a id="paraformer-installation"></a>
+<details>
+<summary>🈶 启用 Paraformer 中文本地 ASR（可选）</summary>
+
+如果你希望在本地 ASR 路径里优先使用 Paraformer 处理中文音频，请额外完成下面两步：
+
+```bash
+# 1) 安装 Paraformer 运行时依赖
+uv sync --extra paraformer
+```
+
+```bash
+# 2) 准备兼容的 Paraformer helper checkout
+# 默认目录：
+third_party/funasr-paraformer
+```
+
+OpenClip 当前会在这个 helper 目录里查找两个脚本：
+
+- `tools/transcribe_long_audio.py`
+- `tools/funasr_json_to_srt.py`
+
+如果你的 helper 项目不在默认目录，可以设置：
+
+```bash
+export PARAFORMER_PROJECT_DIR=/path/to/funasr-paraformer
+```
+
+说明：
+
+- 默认路径已经是仓库相对路径：`third_party/funasr-paraformer`
+- 如果 helper 项目自带 `.venv`，OpenClip 会优先使用它
+- 如果 helper 项目没有 `.venv`，OpenClip 会退回使用当前仓库通过 `uv sync --extra paraformer` 安装出来的环境
+- 如果 helper 项目或依赖不可用，OpenClip 会自动回退到 Whisper
+
+</details>
 
 ### 2. 设置 API 密钥（用于 AI 功能）
 

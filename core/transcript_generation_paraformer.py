@@ -5,9 +5,11 @@ Chinese transcript generation via a local FunASR Paraformer checkout.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -27,19 +29,50 @@ class ParaformerTranscriptProcessor:
     ):
         self.project_dir = Path(project_dir).expanduser().resolve()
         self.device = device
-        self.python_bin = self.project_dir / ".venv" / "bin" / "python"
+        self.current_python_bin = Path(sys.executable).resolve()
+        self.project_python_candidates = [
+            self.project_dir / ".venv" / "bin" / "python",
+            self.project_dir / ".venv" / "Scripts" / "python.exe",
+        ]
+        self.python_bin = self._resolve_python_bin()
         self.transcribe_script = self.project_dir / "tools" / "transcribe_long_audio.py"
         self.json_to_srt_script = self.project_dir / "tools" / "funasr_json_to_srt.py"
 
+    def _resolve_python_bin(self) -> Path:
+        for candidate in self.project_python_candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        return self.current_python_bin
+
+    @staticmethod
+    def _missing_current_env_modules() -> list[str]:
+        required_modules = ("funasr", "modelscope", "soundfile")
+        return [
+            module_name
+            for module_name in required_modules
+            if importlib.util.find_spec(module_name) is None
+        ]
+
     def availability_error(self) -> str | None:
         if not self.project_dir.exists():
-            return f"Paraformer project dir not found: {self.project_dir}"
-        if not self.python_bin.exists():
-            return f"Paraformer Python not found: {self.python_bin}"
+            return (
+                f"Paraformer project dir not found: {self.project_dir}. "
+                "Place a compatible helper checkout there or set PARAFORMER_PROJECT_DIR."
+            )
         if not self.transcribe_script.exists():
             return f"Paraformer transcription script not found: {self.transcribe_script}"
         if not self.json_to_srt_script.exists():
             return f"Paraformer JSON→SRT script not found: {self.json_to_srt_script}"
+        if not self.python_bin.exists():
+            return f"Paraformer Python not found: {self.python_bin}"
+        if self.python_bin == self.current_python_bin:
+            missing_modules = self._missing_current_env_modules()
+            if missing_modules:
+                missing = ", ".join(missing_modules)
+                return (
+                    f"Paraformer dependencies missing in the current environment: {missing}. "
+                    "Run `uv sync --extra paraformer` or provide a helper checkout with its own .venv."
+                )
         return None
 
     def is_available(self) -> bool:

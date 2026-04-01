@@ -32,3 +32,15 @@ def test_llm_config_uses_environment_overrides(monkeypatch):
         assert reloaded.LLM_CONFIG["minimax"]["default_model"] == "MiniMax-Test"
 
     reload_config()
+
+
+def test_paraformer_default_project_dir_is_repo_relative(monkeypatch):
+    with monkeypatch.context() as env:
+        env.delenv("PARAFORMER_PROJECT_DIR", raising=False)
+        reloaded = reload_config()
+
+        assert reloaded.PARAFORMER_PROJECT_DIR == str(
+            reloaded.REPO_ROOT / "third_party" / "funasr-paraformer"
+        )
+
+    reload_config()

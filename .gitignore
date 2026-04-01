@@ -79,6 +79,7 @@ persistent_data.json
 # Local development config
 AGENTS.md
 CLAUDE.md
+.codex
 .kiro/steering/
 .kiro/hooks/
 openclip-dev-config/

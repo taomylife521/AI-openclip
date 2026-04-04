@@ -17,13 +17,16 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## 📢 News
 
+- **2026-04-01**:
+  - Added a `custom_openai` provider with configurable `LLM Model` and `LLM Base URL` in both Streamlit and CLI, so OpenClip can target local or self-hosted OpenAI-compatible endpoints
+  - Switched the default Paraformer helper location to the repo-relative `third_party/funasr-paraformer` to avoid committing machine-specific absolute paths
 - **2026-03-30**:
   - Added default-on clip boundary refinement to make highlight clip starts and ends feel more natural and reduce abrupt cuts
   - Added Streamlit UI support for one-click job creation for multi-part Bilibili videos, background job retry, and cancelling pending jobs after restart, thanks to [@xenoamess](https://github.com/xenoamess)
 - **2026-03-25**:
   - Added [Cookie Guidance](#cookie-guidance) and a clearer Streamlit `Cookie Mode`; for remote videos, try `No cookies` → `Browser cookies` → `Cookies file` in that order
 - **2026-03-24**:
-  - Added [GLM (ZhipuAI)](https://bigmodel.cn) and [MiniMax](https://minimaxi.com) as LLM providers — now supports Qwen, OpenRouter, GLM, and MiniMax
+  - Added [GLM (ZhipuAI)](https://bigmodel.cn) and [MiniMax](https://minimaxi.com) as LLM providers — OpenClip now supports Qwen, OpenRouter, GLM, MiniMax, and `custom_openai`
 - **2026-03-11**:
   - OpenClip is now on skills.sh — install it as an Agent Skill via `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` and let your agent invoke it from any directory
 - **2026-03-08**:
@@ -57,11 +60,11 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## ✨ Features
 - **Flexible Input**: Bilibili/YouTube URLs or local video files
-- **Smart Transcription**: Uses platform subtitles when available, falls back to Whisper
+- **Smart Transcription**: Uses platform subtitles when available; local ASR auto-routes by language, using Whisper for English and Paraformer for Chinese
 - **Speaker Identification** (Preview): automatically identifies who is speaking and labels transcripts with real names — great for interviews, panels, debates, and podcasts
 - **AI Analysis**: Identifies engaging moments based on content, interaction, and entertainment value; supports `--user-intent` to focus the AI on what you care about
 - **Clip Generation**: Extracts the most engaging moments as standalone video clips, automatically generating subtitle files, titles, and cover images
-- **Subtitle Burning** (optional): Hard-burns SRT subtitles into the video frame; optionally translates to a target language via Qwen and burns both tracks as bilingual subtitles
+- **Subtitle Burning** (optional): Hard-burns SRT subtitles into the video frame; optionally translates to a target language via the selected LLM provider and burns both tracks as bilingual subtitles
 - **Background Context**: Optionally add background information (e.g., streamer names) for better analysis
 - **Triple Interface Support**: Streamlit web interface, Agent Skills, and command-line interface for different user needs
 - **Agent Skills**: Built-in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [TRAE](https://www.trae.ai/) agent skills for processing videos with natural language
@@ -88,11 +91,12 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
   - Windows: Download the **full** build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
   </details>
 
-- **LLM API Key** (choose one)
+- **LLM API Key / Endpoint Config** (choose one)
   - **Qwen API Key** - Get your key from [Alibaba Cloud](https://dashscope.aliyun.com/) (uses qwen3.5-flash model by default)
   - **OpenRouter API Key** - Get your key from [OpenRouter](https://openrouter.ai/) (uses stepfun/step-3.5-flash:free model by default)
   - **GLM API Key** - Get your key from [ZhipuAI](https://open.bigmodel.cn/) (uses glm-4.7 model by default)
   - **MiniMax API Key** - Get your key from [MiniMax](https://platform.minimaxi.com/) (uses MiniMax-M2.7 model by default)
+  - **Custom OpenAI-compatible endpoint** - Requires a reachable OpenAI-compatible chat completions endpoint plus `CUSTOM_OPENAI_BASE_URL` and `CUSTOM_OPENAI_MODEL`; `CUSTOM_OPENAI_API_KEY` is optional
 
 - **Firefox Browser** (optional) - For more stable Bilibili video downloads
 - **HuggingFace Token** (optional, for speaker identification) - Get from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and accept the [pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-community-1)
@@ -105,6 +109,11 @@ The following are installed automatically when you run `uv sync`:
 - **yt-dlp** - For downloading videos from Bilibili, YouTube, etc.
 - **Whisper** - For speech-to-text transcription
 - Other Python dependencies (moviepy, streamlit, etc.)
+
+Optional extras:
+
+- `uv sync --extra paraformer` - Installs runtime dependencies for local Chinese ASR via Paraformer
+- `uv sync --extra speakers` - Installs WhisperX dependencies for speaker identification
 
 ## 🚀 Quick Start
 
@@ -119,16 +128,70 @@ cd openclip
 uv sync
 ```
 
+<a id="paraformer-installation"></a>
+<details>
+<summary>🈶 Enable Paraformer For Local Chinese ASR (Optional)</summary>
+
+If you want local ASR to prefer Paraformer for Chinese audio, complete these extra steps:
+
+```bash
+# 1) Install Paraformer runtime dependencies
+uv sync --extra paraformer
+```
+
+```bash
+# 2) Prepare a compatible Paraformer helper checkout
+# Default location:
+third_party/funasr-paraformer
+```
+
+Recommended: place that helper checkout inside this repo so you do not bake machine-specific absolute paths into your setup:
+
+```bash
+mkdir -p third_party
+git clone <funasr-paraformer-helper-repo> third_party/funasr-paraformer
+```
+
+OpenClip currently expects these two helper scripts under that checkout:
+
+- `tools/transcribe_long_audio.py`
+- `tools/funasr_json_to_srt.py`
+
+If your helper checkout lives elsewhere, point OpenClip to it with:
+
+```bash
+export PARAFORMER_PROJECT_DIR=/path/to/funasr-paraformer
+```
+
+Notes:
+
+- The default path is repo-relative: `third_party/funasr-paraformer`
+- If the helper checkout has its own `.venv`, OpenClip will prefer that interpreter
+- If the helper checkout does not have a `.venv`, OpenClip falls back to the current repo environment created by `uv sync --extra paraformer`
+- If the helper checkout or dependencies are unavailable, OpenClip automatically falls back to Whisper
+
+</details>
+
 ### 2. Set API Key (for AI features)
 
-Set the environment variable for your chosen LLM provider (at least one):
+Set the environment variables for your chosen LLM provider (configure at least one provider):
 
 ```bash
 export QWEN_API_KEY=your_api_key_here        # Qwen (Alibaba)
 export OPENROUTER_API_KEY=your_api_key_here   # OpenRouter
 export GLM_API_KEY=your_api_key_here          # GLM / ZhipuAI (bigmodel.cn, China endpoint)
 export MINIMAX_API_KEY=your_api_key_here      # MiniMax (minimaxi.com, China endpoint)
+export CUSTOM_OPENAI_API_KEY=your_api_key_here # custom_openai, optional
+export CUSTOM_OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+export CUSTOM_OPENAI_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
+
+Notes:
+
+- `custom_openai` is useful for LM Studio, vLLM, One API, New API, or any other OpenAI-compatible service
+- `CUSTOM_OPENAI_BASE_URL` can be either an API root such as `.../v1` or a full `/chat/completions` endpoint
+- Leave `CUSTOM_OPENAI_API_KEY` empty if your compatible endpoint does not require Bearer authentication
+- The Streamlit sidebar lets you override `LLM Model` and `LLM Base URL` per provider; the CLI equivalents are `--llm-model` and `--llm-base-url`
 
 ### 3. Run the Pipeline
 
@@ -143,10 +206,12 @@ Once the app starts, open your browser and visit the displayed URL (typically `h
 
 **Usage Flow:**
 1. Select input type (Video URL or Local File) in the sidebar
-2. Configure processing options (LLM provider, etc.)
+2. Configure processing options (`LLM provider`, `LLM Model`, `LLM Base URL`, cookie mode, etc.)
 3. Click "Process Video" button to start processing
 4. View real-time progress and final results
 5. Preview generated clips and covers in the results section
+
+If you choose `custom_openai`, fill in both `LLM Model` and `LLM Base URL` in the sidebar. Leave API Key empty if your endpoint does not require authentication.
 
 **Advantages:** No need to remember command-line parameters, provides visual operation interface, suitable for all users.
 
@@ -263,7 +328,7 @@ uv run python video_orchestrator.py --speaker-references references/ "VIDEO_URL_
 <details>
 <summary>🔤 Subtitle Burning (Optional)</summary>
 
-Hard-burns SRT subtitle files into the video frame so subtitles are always visible regardless of the player. Supports burning the original SRT only, or translating via Qwen and burning both tracks as bilingual subtitles. Speaker tags (e.g. `[Sam Altman]`) are automatically stripped from the on-screen display.
+Hard-burns SRT subtitle files into the video frame so subtitles are always visible regardless of the player. Supports burning the original SRT only, or translating via the selected LLM provider and burning both tracks as bilingual subtitles. Speaker tags (e.g. `[Sam Altman]`) are automatically stripped from the on-screen display.
 
 **Prerequisite: ffmpeg must include libass** (see install instructions above)
 
@@ -325,13 +390,15 @@ Remote video downloads sometimes hit login checks, bot protection, or platform r
 |----------|-------------|---------|
 | `VIDEO_URL_OR_PATH` | Video URL or local file path (positional) | Required |
 | `-o`, `--output` | Custom output directory | `processed_videos` |
-| `--llm-provider` | LLM provider (`qwen`, `openrouter`, `glm`, or `minimax`) | `qwen` |
+| `--llm-provider` | LLM provider (`qwen`, `openrouter`, `glm`, `minimax`, or `custom_openai`) | `qwen` |
+| `--llm-model` | Override the model name used by the selected provider; typically required for `custom_openai` | Provider default |
+| `--llm-base-url` | Override the OpenAI-compatible chat completions URL used by the selected provider; typically required for `custom_openai` | Provider default |
 | `--language` | Output language (`zh` or `en`) | `zh` |
 | `--browser` | Browser for cookies (`chrome`/`firefox`/`edge`/`safari`); only used when explicitly provided | None |
 | `--cookies` | Path to a Netscape-format `cookies.txt` file; takes precedence over `--browser` | None |
 | `--js-runtime` | JavaScript runtime strategy for YouTube downloads only (`auto`/`deno`/`node`/`none`) | `auto` |
 | `--js-runtime-path` | Path to the JavaScript runtime executable for YouTube only (advanced) | None |
-| `--force-whisper` | Force Whisper transcription (ignore platform subtitles) | Off |
+| `--force-whisper` | Force local ASR transcription (ignore platform subtitles); English uses Whisper and Chinese uses Paraformer | Off |
 | `--use-background` | Use background info for analysis | Off |
 | `--normalize-boundaries` / `--no-normalize-boundaries` | Align clip starts and ends to nearby subtitle boundaries during clip generation; prefers sentence boundaries first and subtitle-gap pauses second. Enabled by default, disable with `--no-normalize-boundaries` | On |
 | `--user-intent` | Natural language description of what you're looking for (e.g. `"moments about AI risks"`); steers LLM clip selection and ranking | None |
@@ -397,6 +464,15 @@ uv run python video_orchestrator.py \
 **Skip download, reprocess existing video:**
 ```bash
 uv run python video_orchestrator.py --skip-download --title-style crystal_ice "VIDEO_URL"
+```
+
+**Use a custom OpenAI-compatible endpoint:**
+```bash
+uv run python video_orchestrator.py \
+  --llm-provider custom_openai \
+  --llm-model Qwen/Qwen2.5-7B-Instruct \
+  --llm-base-url http://127.0.0.1:8000/v1 \
+  "VIDEO_URL"
 ```
 
 ## 📁 Output Structure
@@ -489,7 +565,7 @@ Output Ready!
 - If YouTube only exposes image/storyboard formats or reports `Requested format is not available`, OpenClip will auto-try `deno`/`node` as a JS runtime. If needed, install one and pass `--js-runtime node --js-runtime-path /path/to/node` explicitly.
 
 ### No clips generated
-**Cause**: Missing API key or analysis failed. Check `echo $QWEN_API_KEY`, `echo $OPENROUTER_API_KEY`, `echo $GLM_API_KEY`, or `echo $MINIMAX_API_KEY`, and verify analysis files exist.
+**Cause**: Missing LLM credentials / endpoint config or analysis failed. Check `echo $QWEN_API_KEY`, `echo $OPENROUTER_API_KEY`, `echo $GLM_API_KEY`, `echo $MINIMAX_API_KEY`, or verify `CUSTOM_OPENAI_BASE_URL` / `CUSTOM_OPENAI_MODEL` are set, then confirm the analysis files exist.
 
 ### FFmpeg errors
 **Cause**: FFmpeg not installed or not in PATH. Run `ffmpeg -version` to check, install if missing (macOS: `brew install ffmpeg`).
@@ -506,7 +582,7 @@ Output Ready!
 **Speakers not matched (showing SPEAKER_XX instead of names)**: The reference audio similarity is below the threshold (default 0.7). Try a longer, cleaner reference clip (10–30 seconds recommended) with only one speaker throughout.
 
 ### Chinese text not displaying
-**Cause**: Missing Chinese fonts. macOS auto-detects (STHeiti, PingFang), Windows needs SimSun or Microsoft YaHei, Linux needs `fonts-wqy-zenhei`.
+**Cause**: Missing Chinese fonts. OpenClip auto-detects common CJK fonts on macOS (STHeiti, PingFang), Windows (SimSun, Microsoft YaHei), and Linux (Noto / WenQuanYi / Source Han). If none are available, it now reports a clear missing-font error instead of silently rendering broken text. On Linux, install `fonts-noto-cjk`, `fonts-wqy-zenhei`, or `adobe-source-han-sans-otc-fonts`.
 
 </details>
 

@@ -31,6 +31,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from core.config import API_KEY_ENV_VARS
+from core.font_utils import build_missing_font_message, find_best_font
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 #   "[Sam Altman] text"  →  "text"
 #   "[SPEAKER_01] >> text"  →  "text"
 _SPEAKER_TAG_RE = re.compile(r"^\[.*?\]\s*(?:>>\s*)?", re.UNICODE)
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
 ASS_PLAY_RES_X = 1920
@@ -169,26 +171,80 @@ class SubtitleBurner:
         api_key: str = None,
         provider: str = "qwen",
         model: str = None,
+        base_url: str = None,
+        enable_llm: bool = False,
         subtitle_style_config: SubtitleStyleConfig | None = None,
     ):
         self.model = model  # None → each client uses its config default
         self.subtitle_style_config = (subtitle_style_config or SubtitleStyleConfig()).normalized()
-        if api_key:
+        if enable_llm:
             provider = provider.lower()
             if provider == "openrouter":
                 from core.llm.openrouter_api_client import OpenRouterAPIClient
-                self.client = OpenRouterAPIClient(api_key=api_key)
+                self.client = OpenRouterAPIClient(api_key=api_key, base_url=base_url)
             elif provider == "glm":
                 from core.llm.glm_api_client import GLMAPIClient
-                self.client = GLMAPIClient(api_key=api_key)
+                self.client = GLMAPIClient(api_key=api_key, base_url=base_url)
             elif provider == "minimax":
                 from core.llm.minimax_api_client import MiniMaxAPIClient
-                self.client = MiniMaxAPIClient(api_key=api_key)
+                self.client = MiniMaxAPIClient(api_key=api_key, base_url=base_url)
+            elif provider == "custom_openai":
+                from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
+                self.client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)
             else:
                 from core.llm.qwen_api_client import QwenAPIClient
-                self.client = QwenAPIClient(api_key=api_key)
+                self.client = QwenAPIClient(api_key=api_key, base_url=base_url)
         else:
             self.client = None
+
+    @staticmethod
+    def _contains_cjk(text: str) -> bool:
+        return bool(_CJK_RE.search(text or ""))
+
+    @staticmethod
+    def _font_family_from_path(font_path: str) -> str:
+        try:
+            result = subprocess.run(
+                ["fc-scan", "--format", "%{family}\n", font_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            family = (result.stdout or "").strip().splitlines()
+            if result.returncode == 0 and family and family[0].strip():
+                return family[0].strip()
+        except (FileNotFoundError, OSError):
+            pass
+
+        return Path(font_path).stem
+
+    @classmethod
+    def _resolve_ass_font(cls, language: str) -> tuple[str, str | None]:
+        font_path = find_best_font(language, prefer_bold=False, allow_generic_fallback=True)
+        if not font_path:
+            if language == "zh":
+                logger.warning(build_missing_font_message(language))
+            return "Arial", None
+
+        return cls._font_family_from_path(font_path), str(Path(font_path).resolve().parent)
+
+    @classmethod
+    def build_ass_filter_value(cls, ass_path: str | Path, language: str = "zh") -> str:
+        ass_path = Path(ass_path)
+        _, font_dir = cls._resolve_ass_font(language)
+        filter_value = f"ass={cls._escape_ffmpeg_filter_value(ass_path)}"
+        if font_dir:
+            filter_value += f":fontsdir={cls._escape_ffmpeg_filter_value(font_dir)}"
+        return filter_value
+
+    @staticmethod
+    def _escape_ffmpeg_filter_value(value: str | Path) -> str:
+        escaped = str(value).replace("\\", "/")
+        for char in (":", "'", "[", "]", ",", ";"):
+            escaped = escaped.replace(char, f"\\{char}")
+        return escaped
 
     # ------------------------------------------------------------------
     # Public API
@@ -500,7 +556,7 @@ class SubtitleBurner:
             show_translation,
         )
 
-    def _build_ass_header(self, translated: list | None) -> tuple[str, bool]:
+    def _build_ass_header(self, segments: list, translated: list | None) -> tuple[str, bool]:
         layout, show_translation = self._resolve_ass_layout(translated)
         preset = layout["preset"]
         font_size = layout["font_size"]
@@ -508,6 +564,11 @@ class SubtitleBurner:
         shadow = layout["shadow"]
         outline_color = layout["outline_color"]
         back_color = layout["back_color"]
+        use_cjk_font = any(self._contains_cjk(seg["text"]) for seg in segments)
+        if translated:
+            use_cjk_font = use_cjk_font or any(self._contains_cjk(seg["text"]) for seg in translated)
+        font_language = "zh" if use_cjk_font else "default"
+        font_name, _ = self._resolve_ass_font(font_language)
 
         if show_translation:
             original_color = preset.original_color
@@ -520,14 +581,14 @@ class SubtitleBurner:
 
         original_style = (
             "Style: Original,"
-            f"{preset.font_name},{font_size},{original_color},&H000000FF,"
+            f"{font_name},{font_size},{original_color},&H000000FF,"
             f"{outline_color},{back_color},{preset.bold},0,0,0,"
             f"100,100,0,0,{border_style},"
             f"{preset.outline},{shadow},{ASS_ALIGNMENT_BOTTOM_CENTER},10,10,{original_margin},1"
         )
         translation_style = (
             "Style: Translation,"
-            f"{preset.font_name},{font_size},{preset.translation_color},&H000000FF,"
+            f"{font_name},{font_size},{preset.translation_color},&H000000FF,"
             f"{outline_color},{back_color},{preset.bold},0,0,0,"
             f"100,100,0,0,{border_style},"
             f"{preset.outline},{shadow},{ASS_ALIGNMENT_BOTTOM_CENTER},10,10,{layout['translation_margin']},1"
@@ -554,7 +615,7 @@ class SubtitleBurner:
 
     def _generate_ass(self, segments: list, translated: list = None) -> str:
         """Build full ASS file content. Includes translation track if provided."""
-        header, show_translation = self._build_ass_header(translated)
+        header, show_translation = self._build_ass_header(segments, translated)
         layout, _ = self._resolve_ass_layout(translated)
         boxed_style = layout["border_style"] == 3
         lines = [header]
@@ -605,7 +666,7 @@ class SubtitleBurner:
                 "ffmpeg",
                 "-loop", "1",
                 "-i", str(background.resolve()),
-                "-vf", f"ass={tmp_ass.name}",
+                "-vf", self.build_ass_filter_value(tmp_ass.name, language="zh"),
                 "-frames:v", "1",
                 "-y", str(output.resolve()),
             ]
@@ -635,7 +696,7 @@ class SubtitleBurner:
             cmd = [
                 "ffmpeg",
                 "-i", str(mp4.resolve()),
-                "-vf", f"ass={tmp_ass.name}",
+                "-vf", self.build_ass_filter_value(tmp_ass.name, language="zh"),
                 "-c:a", "copy",
                 "-y", str(output.resolve()),
             ]

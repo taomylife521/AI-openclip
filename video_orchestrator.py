@@ -36,7 +36,7 @@ from core.video_utils import (
     find_existing_download,
     insights_to_clip_format,
 )
-from core.config import DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, API_KEY_ENV_VARS, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, SKIP_DOWNLOAD, SKIP_TRANSCRIPT
+from core.config import DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, API_KEY_ENV_VARS, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, SKIP_DOWNLOAD, SKIP_TRANSCRIPT, SUPPORTED_LLM_PROVIDERS
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -58,6 +58,8 @@ class VideoOrchestrator:
                 js_runtime_path: Optional[str] = None,
                 api_key: Optional[str] = None,
                 llm_provider: str = DEFAULT_LLM_PROVIDER,
+                llm_model: Optional[str] = None,
+                llm_base_url: Optional[str] = None,
                 skip_analysis: bool = False,
                 generate_clips: bool = True,
                 add_titles: bool = False,
@@ -96,7 +98,7 @@ class VideoOrchestrator:
             js_runtime: JavaScript runtime strategy for YouTube ('auto', 'deno', 'node', 'none')
             js_runtime_path: Optional explicit path to the JS runtime executable
             api_key: API key for the selected LLM provider
-            llm_provider: LLM provider to use ("qwen" or "openrouter", default: from config.py)
+            llm_provider: LLM provider to use (default: from config.py)
             skip_analysis: Skip engaging moments analysis (clips can still use existing analysis file)
             generate_clips: Whether to generate clips from engaging moments
             add_titles: Whether to add artistic titles to clips
@@ -118,6 +120,8 @@ class VideoOrchestrator:
         self.language = language
         self.debug = debug
         self.llm_provider = llm_provider.lower()
+        self.llm_model = llm_model.strip() if llm_model else None
+        self.llm_base_url = llm_base_url.strip() if llm_base_url else None
         self.custom_prompt_file = custom_prompt_file
         self.use_background = use_background
         self.mode = mode
@@ -147,12 +151,15 @@ class VideoOrchestrator:
         self.skip_analysis = skip_analysis
         self.engaging_moments_analyzer = None
         self.insights_analyzer = None
-        if not skip_analysis and api_key:
+        analysis_capable_without_api_key = self.llm_provider == "custom_openai"
+        if not skip_analysis and (api_key or analysis_capable_without_api_key):
             try:
                 if mode == "insights":
                     self.insights_analyzer = InsightsAnalyzer(
                         api_key=api_key,
                         provider=self.llm_provider,
+                        model=self.llm_model,
+                        base_url=self.llm_base_url,
                         use_background=use_background,
                         language=language,
                         debug=self.debug,
@@ -162,6 +169,8 @@ class VideoOrchestrator:
                     self.engaging_moments_analyzer = EngagingMomentsAnalyzer(
                         api_key=api_key,
                         provider=self.llm_provider,
+                        model=self.llm_model,
+                        base_url=self.llm_base_url,
                         use_background=use_background,
                         language=language,
                         debug=self.debug,
@@ -171,6 +180,11 @@ class VideoOrchestrator:
                     )
                 logger.info(f"🧠 Engaging moments analysis: enabled (provider: {self.llm_provider}, language: {language}, mode: {mode}, background: {'yes' if use_background else 'no'})")
             except ValueError as e:
+                if self.llm_provider == "custom_openai":
+                    raise ValueError(
+                        "Invalid custom_openai analysis configuration. "
+                        f"{e}"
+                    ) from e
                 logger.warning(f"🔑 Engaging moments analysis disabled: {e}")
         elif skip_analysis:
             logger.info("🧠 Engaging moments analysis: skipped (--skip-analysis)")
@@ -203,6 +217,9 @@ class VideoOrchestrator:
             self.subtitle_burner = SubtitleBurner(
                 api_key=api_key if subtitle_translation else None,
                 provider=llm_provider,
+                model=self.llm_model,
+                base_url=self.llm_base_url,
+                enable_llm=bool(subtitle_translation),
                 subtitle_style_config=SubtitleStyleConfig(
                     preset=subtitle_style_preset,
                     font_size=subtitle_style_font_size,
@@ -231,7 +248,7 @@ class VideoOrchestrator:
         
         logger.info(f"🎬 Video Orchestrator initialized")
         logger.info(f"📁 Output directory: {self.output_dir}")
-        logger.info(f"🤖 Whisper model: {whisper_model}")
+        logger.info(f"🤖 English Whisper model: {whisper_model}")
 
     async def process_video(self,
                           source: str,
@@ -245,7 +262,7 @@ class VideoOrchestrator:
 
         Args:
             source: Video URL (Bilibili/YouTube) or local video file path
-            force_whisper: Force transcript generation via Whisper (ignore platform subtitles)
+            force_whisper: Force local ASR transcript generation (ignore platform subtitles)
             custom_filename: Custom filename template
             skip_download: Skip video download (use existing downloaded video)
             skip_transcript: Skip transcript generation (use existing transcript files)
@@ -346,7 +363,7 @@ class VideoOrchestrator:
                 result.video_parts = [str(splits_video)]
                 result.video_path = str(splits_video)
 
-                if not skip_transcript and subtitle_path and Path(subtitle_path).exists():
+                if subtitle_path and Path(subtitle_path).exists():
                     sub_file = Path(subtitle_path)
                     # Add _part01 suffix to subtitle filename
                     splits_sub_name = f"{sub_file.stem}_part01{sub_file.suffix}"
@@ -1074,7 +1091,7 @@ Examples:
   python video_orchestrator.py "https://www.bilibili.com/video/BV1wT6GBBEPp"
   python video_orchestrator.py "https://www.youtube.com/watch?v=5MWT_doo68k"
   
-  # Full pipeline with engaging moments, clips, and titles (set QWEN_API_KEY)
+  # Full pipeline with engaging moments, clips, and titles (set the selected provider API key if needed)
   export QWEN_API_KEY=your_api_key
   python video_orchestrator.py "https://www.bilibili.com/video/BV1234567890"
   
@@ -1113,7 +1130,7 @@ Examples:
   # Specify output directory
   python video_orchestrator.py -o "my_outputs" "https://www.bilibili.com/video/BV1234567890"
 
-Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your selected LLM provider
+Note: Set the API key environment variable for your selected provider when required
         """
     )
     
@@ -1121,7 +1138,8 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
     parser.add_argument('-o', '--output', default='processed_videos',
                        help='Output directory (default: processed_videos)')
     parser.add_argument('--force-whisper', action='store_true',
-                       help='Force transcript generation via Whisper (ignore platform subtitles)')
+                       help='Force local ASR transcript generation (ignore platform subtitles). '
+                            'English uses Whisper; Chinese uses Paraformer.')
     parser.add_argument('--skip-download', action='store_true', default=SKIP_DOWNLOAD,
                        help='Skip video download and use existing downloaded video')
     parser.add_argument('--skip-transcript', action='store_true', default=SKIP_TRANSCRIPT,
@@ -1159,8 +1177,12 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
                        choices=['zh', 'en'],
                        help='Language for output (zh: Chinese, en: English, default: zh)')
     parser.add_argument('--llm-provider', default='qwen',
-                       choices=['qwen', 'openrouter', 'glm', 'minimax'],
+                       choices=list(SUPPORTED_LLM_PROVIDERS),
                        help='LLM provider to use for engaging moments analysis (default: qwen)')
+    parser.add_argument('--llm-model',
+                       help='Override the LLM model name for the selected provider')
+    parser.add_argument('--llm-base-url',
+                       help='Override the OpenAI-compatible chat completions base URL for the selected provider')
     parser.add_argument('--cover-text-location', default='center',
                        choices=['top', 'upper_middle', 'bottom', 'center'],
                        help='Text position on cover images (default: center)')
@@ -1186,7 +1208,7 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
     parser.add_argument('--subtitle-translation', metavar='LANG',
                        help='Translate subtitles to this language before burning '
                             '(e.g. "Simplified Chinese"). Both original and translated tracks are burned. '
-                            'Requires --burn-subtitles and QWEN_API_KEY.')
+                            'Requires --burn-subtitles and any provider credentials/configuration needed by the selected LLM.')
     parser.add_argument('--user-intent', metavar='TEXT',
                        help='Free-text description of what you are looking for '
                             '(e.g. "moments about AI risks"). Steers LLM clip selection '
@@ -1228,6 +1250,8 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
         js_runtime_path=args.js_runtime_path,
         api_key=api_key,
         llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+        llm_base_url=args.llm_base_url,
         skip_analysis=args.skip_analysis,
         generate_clips=not args.skip_clips,
         add_titles=args.add_titles,

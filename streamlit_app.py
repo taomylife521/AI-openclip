@@ -1574,11 +1574,6 @@ if completed_jobs:
     time.sleep(2)
     st.rerun()
 
-# Auto-refresh while processing (at the end of script)
-if st.session_state.processing:
-    time.sleep(2)
-    st.rerun()
-
 # ============================================================================
 # BUTTON CLICK HANDLERS
 # ============================================================================
@@ -1816,14 +1811,5 @@ with col2:
 # ============================================================================
 # This must be at the very end to refresh the entire page
 if st.session_state.processing:
-    # Track last refresh time to avoid too frequent updates
-    if 'last_refresh_time' not in st.session_state:
-        st.session_state.last_refresh_time = 0
-    
-    current_time = time.time()
-    time_since_refresh = current_time - st.session_state.last_refresh_time
-    
-    # Only refresh if at least 2 seconds have passed
-    if time_since_refresh >= 2:
-        st.session_state.last_refresh_time = current_time
-        st.rerun()
+    time.sleep(2)
+    st.rerun()

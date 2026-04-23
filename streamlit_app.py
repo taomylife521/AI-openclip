@@ -14,8 +14,10 @@ import time
 import threading
 import tempfile
 import copy
+import webbrowser
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
 from core.browser_preferences import (
     PREFERENCES_COOKIE_NAME,
@@ -56,6 +58,9 @@ from core.upload_staging import (
 )
 
 
+LOCAL_EDITOR_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+
 def is_bilibili_url(url: str) -> bool:
     """Check if URL is a Bilibili URL"""
     if not url:
@@ -67,6 +72,25 @@ def is_bilibili_url(url: str) -> bool:
         r'https?://(?:m\.)?bilibili\.com/video/',
     ]
     return any(re.match(pattern, url) for pattern in bilibili_patterns)
+
+
+def _is_local_editor_url(editor_url: str) -> bool:
+    try:
+        host = urlparse(editor_url).hostname or ''
+    except Exception:
+        return False
+    return host.lower() in LOCAL_EDITOR_HOSTS
+
+
+def _show_editor_launch(editor_url: str) -> None:
+    st.session_state.editor_launch_url = editor_url
+    if _is_local_editor_url(editor_url):
+        webbrowser.open_new_tab(editor_url)
+        st.success(f'Editor launched: {editor_url}')
+    else:
+        st.success('Editor is ready.')
+        st.caption('Open the editor from this browser. The server will not open a tab for remote/LAN URLs.')
+    st.markdown(f'[Open Clip Editor]({editor_url})')
 
 
 async def get_bilibili_multi_parts(url: str, browser: Optional[str] = None, cookies_file: Optional[str] = None) -> list:
@@ -670,10 +694,9 @@ def display_results(result):
                         editor_project['project_id'],
                         projects_root=editor_project.get('projects_root') or str(Path(editor_project['project_root']).parent),
                         jobs_dir=str((Path.cwd() / 'jobs').resolve()),
-                        open_browser=True,
+                        open_browser=False,
                     )
-                    st.session_state.editor_launch_url = editor_url
-                    st.success(f'Editor launched: {editor_url}')
+                    _show_editor_launch(editor_url)
                 except Exception as exc:
                     st.warning(f'Editor unavailable: {exc}')
     else:
@@ -695,10 +718,9 @@ def _launch_editor_for_job(job) -> None:
             project_id,
             projects_root=projects_root,
             jobs_dir=str((Path.cwd() / 'jobs').resolve()),
-            open_browser=True,
+            open_browser=False,
         )
-        st.session_state.editor_launch_url = editor_url
-        st.success(f'Editor launched: {editor_url}')
+        _show_editor_launch(editor_url)
     except Exception as exc:
         st.warning(f'Editor unavailable: {exc}')
 

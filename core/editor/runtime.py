@@ -80,6 +80,13 @@ def _health_url(host: str, port: int) -> str:
     return f'http://{host}:{port}{HEALTH_PATH}'
 
 
+def _health_check_host(bind_host: str) -> str:
+    # 0.0.0.0 is a bind address, not a reliable client destination.
+    if bind_host in {'0.0.0.0', '::'}:
+        return '127.0.0.1'
+    return bind_host
+
+
 def _healthy(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
         response = requests.get(_health_url(host, port), timeout=timeout)
@@ -151,11 +158,11 @@ def ensure_editor_service(
     normalized_projects_root = _normalized_path(projects_root)
     normalized_jobs_dir = _normalized_path(jobs_dir)
     bind_host, configured_port, public_base_url = _editor_runtime_config(host)
+    health_host = _health_check_host(bind_host)
 
     with _runtime_lock():
         record = _load_runtime_record()
         port = int(record.get('port') or 0)
-        pid = record.get('pid')
         same_port = configured_port is None or port == configured_port
         same_runtime = (
             record.get('projects_root') == normalized_projects_root
@@ -163,7 +170,7 @@ def ensure_editor_service(
             and record.get('host') == bind_host
             and same_port
         )
-        if port and same_runtime and _is_process_alive(pid) and _healthy(bind_host, port):
+        if port and same_runtime and _healthy(health_host, port):
             url = _project_url(project_id, base_url=public_base_url, host=bind_host, port=port)
             if open_browser:
                 webbrowser.open_new_tab(url)
@@ -214,7 +221,7 @@ def ensure_editor_service(
             }
             _save_runtime_record(record)
             for _ in range(50):
-                if _healthy(bind_host, port):
+                if _healthy(health_host, port):
                     url = _project_url(project_id, base_url=public_base_url, host=bind_host, port=port)
                     if open_browser:
                         webbrowser.open_new_tab(url)

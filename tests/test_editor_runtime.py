@@ -51,7 +51,25 @@ def test_ensure_editor_service_uses_configured_public_base_url_for_reused_runtim
     runtime._ensure_runtime_dir()
     runtime._save_runtime_record({'pid': 123, 'port': 8765, 'host': '0.0.0.0', 'projects_root': str((tmp_path / 'processed_videos').resolve()), 'jobs_dir': str((tmp_path / 'jobs').resolve())})
     monkeypatch.setattr(runtime, '_is_process_alive', lambda pid: True)
-    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '0.0.0.0' and port == 8765)
+    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '127.0.0.1' and port == 8765)
+
+    url = runtime.ensure_editor_service('proj-lan', projects_root=tmp_path / 'processed_videos', jobs_dir=tmp_path / 'jobs')
+
+    assert url == 'http://192.168.1.10:8765/projects/proj-lan'
+
+
+def test_ensure_editor_service_reuses_healthy_runtime_with_stale_pid(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('OPENCLIP_EDITOR_BASE_URL', 'http://192.168.1.10:8765/')
+    runtime._ensure_runtime_dir()
+    runtime._save_runtime_record({'pid': 123, 'port': 8765, 'host': '0.0.0.0', 'projects_root': str((tmp_path / 'processed_videos').resolve()), 'jobs_dir': str((tmp_path / 'jobs').resolve())})
+    monkeypatch.setattr(runtime, '_is_process_alive', lambda pid: False)
+    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '127.0.0.1' and port == 8765)
+    monkeypatch.setattr(
+        runtime.subprocess,
+        'Popen',
+        lambda *args, **kwargs: pytest.fail('healthy editor runtime should be reused'),
+    )
 
     url = runtime.ensure_editor_service('proj-lan', projects_root=tmp_path / 'processed_videos', jobs_dir=tmp_path / 'jobs')
 
@@ -66,7 +84,7 @@ def test_ensure_editor_service_launches_lan_runtime_from_base_url(tmp_path, monk
     monkeypatch.setattr(runtime.shutil, 'which', lambda name: '/usr/local/bin/uv' if name == 'uv' else None)
 
     calls = {'cmd': None}
-    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '0.0.0.0' and port == 8765)
+    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '127.0.0.1' and port == 8765)
     monkeypatch.setattr(
         runtime.subprocess,
         'Popen',
@@ -132,7 +150,7 @@ def test_ensure_editor_service_does_not_reuse_runtime_with_wrong_host(tmp_path, 
     monkeypatch.setattr(runtime.shutil, 'which', lambda name: '/usr/local/bin/uv' if name == 'uv' else None)
 
     calls = {'cmd': None}
-    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '0.0.0.0' and port == 8765)
+    monkeypatch.setattr(runtime, '_healthy', lambda host, port, timeout=0.5: host == '127.0.0.1' and port == 8765)
     monkeypatch.setattr(
         runtime.subprocess,
         'Popen',

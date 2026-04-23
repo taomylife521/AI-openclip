@@ -19,7 +19,7 @@
 
 - **2026-04-23**:
   - 新增后处理 `Clip Editor`：可对单个片段进行边界、字幕、封面标题与封面图的二次调整，并支持倍速重渲染
-  - Streamlit 新增浏览器内 `文件上传` 入口，可直接上传本地视频并创建处理任务
+  - Streamlit 新增浏览器内 `文件上传` 入口，可直接上传本地视频并创建处理任务；支持[局域网/共享机器模式](#lan-shared-machine-mode)
 - **2026-04-19**:
   - 新增 `--deep-optimize` / Streamlit「深度优化」模式：在候选片段汇总后增加一轮更深入的 AI 检查与边界修正，以提升片段边界质量和独立成段效果，详见[开启 `--deep-optimize` 时](#开启---deep-optimize-时)
 - **2026-04-04**:
@@ -209,10 +209,11 @@ uv run python -m streamlit run streamlit_app.py
 
 应用启动后，打开浏览器访问显示的 URL（通常是 `http://localhost:8501`）。
 
+<a id="lan-shared-machine-mode"></a>
 <details>
 <summary>局域网/共享机器模式</summary>
 
-如果需要从同一局域网内的其他设备访问 Streamlit，并让「Open in Editor」打开可访问的 Clip Editor 地址：
+如果需要从同一局域网内的其他设备访问 Streamlit，并让「Open in Editor」显示可访问的 Clip Editor 链接：
 
 ```bash
 export OPENCLIP_EDITOR_BASE_URL=http://HOST_LAN_IP:8765
@@ -230,6 +231,8 @@ ipconfig getifaddr en0
 ```
 
 在另一台同网设备上打开 `http://HOST_LAN_IP:8501`。Clip Editor 项目地址形如 `http://HOST_LAN_IP:8765/projects/PROJECT_ID`。
+
+在局域网模式下，「Open in Editor」会在 Streamlit 中显示「Open Clip Editor」链接，而不会在服务器机器上自动打开浏览器标签页。如果链接无法打开，请确认两台设备在同一网络，并允许防火墙访问 `8501` 和 `8765` 端口。
 
 </details>
 

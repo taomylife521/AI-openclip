@@ -19,7 +19,7 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 - **2026-04-23**:
   - Added a post-processing `Clip Editor` for per-clip boundary, subtitle, cover-title, and cover-image adjustments, with support for speed-based rerendering
-  - Added an in-browser `File Upload` entry in Streamlit so local videos can be uploaded directly to create processing jobs
+  - Added an in-browser `File Upload` entry in Streamlit so local videos can be uploaded directly to create processing jobs; supports [LAN/shared-machine mode](#lan-shared-machine-mode)
 - **2026-04-19**:
   - Added `--deep-optimize` / Streamlit “Deep Optimize” mode: after candidate highlight aggregation, OpenClip runs extra AI review, boundary repair, and re-review steps to improve clip boundaries and standalone quality. See [With `--deep-optimize`](#with---deep-optimize)
 - **2026-04-04**:
@@ -209,10 +209,11 @@ uv run python -m streamlit run streamlit_app.py
 
 Once the app starts, open your browser and visit the displayed URL (typically `http://localhost:8501`).
 
+<a id="lan-shared-machine-mode"></a>
 <details>
 <summary>LAN/shared-machine mode</summary>
 
-To access Streamlit from another device on the same network and make "Open in Editor" use a reachable Clip Editor URL:
+To access Streamlit from another device on the same network and make "Open in Editor" show a reachable Clip Editor link:
 
 ```bash
 export OPENCLIP_EDITOR_BASE_URL=http://HOST_LAN_IP:8765
@@ -230,6 +231,8 @@ ipconfig getifaddr en0
 ```
 
 Open `http://HOST_LAN_IP:8501` from another device on the same network. Clip Editor project URLs look like `http://HOST_LAN_IP:8765/projects/PROJECT_ID`.
+
+In LAN mode, "Open in Editor" shows an "Open Clip Editor" link in Streamlit instead of opening a browser tab on the server machine. If the link does not open, make sure both devices are on the same network and that firewall rules allow access to ports `8501` and `8765`.
 
 </details>
 

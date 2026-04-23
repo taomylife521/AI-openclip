@@ -724,73 +724,44 @@ def _launch_editor_for_job(job) -> None:
     except Exception as exc:
         st.warning(f'Editor unavailable: {exc}')
 
-# Custom CSS
-st.markdown("""
+# Custom CSS (Slate light theme polish — core palette lives in .streamlit/config.toml)
+st.markdown(
+    """
 <style>
-    .stProgress > div > div > div > div {
-        background-color: #4CAF50;
-    }
     .stButton > button {
-        background-color: #4CAF50;
-        color: white;
-        border-radius: 4px;
+        border-radius: 6px;
     }
-    .stFileUploader > label {
-        color: #333;
-        font-weight: bold;
-    }
-    .stTextInput > label {
-        font-weight: bold;
-    }
-    .stSelectbox > label {
-        font-weight: bold;
-    }
+    .stFileUploader > label,
+    .stTextInput > label,
+    .stSelectbox > label,
     .stCheckbox > label {
-        font-weight: bold;
+        font-weight: 600;
     }
-    /* Smaller font for clip preview checkboxes in the main area */
     .stMainBlockContainer .stCheckbox label p {
         font-size: 0.8rem !important;
     }
     .video-container {
         border-radius: 8px;
         overflow: hidden;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.08);
     }
-    .result-card {
-        border-radius: 8px;
-        padding: 16px;
-        margin: 8px 0;
-        background-color: #f9f9f9;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
-    /* Reduce spacing between columns */
-    .stColumns > div {
-        gap: 0.25rem !important;
-    }
-    /* Target column containers directly */
-    .stColumn {
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-    /* Reduce margin around videos */
+    .stColumns > div { gap: 0.25rem !important; }
+    .stColumn { padding: 0 !important; margin: 0 !important; }
     .stVideo {
         margin-bottom: 0.5rem !important;
         margin-right: 0 !important;
         margin-left: 0 !important;
     }
-    /* Reduce margin around text under videos */
     .stMarkdown {
         margin-bottom: 0.5rem !important;
         margin-right: 0 !important;
         margin-left: 0 !important;
     }
-    /* Reduce padding in expander content */
-    .streamlit-expanderContent {
-        padding: 0.5rem !important;
-    }
+    .streamlit-expanderContent { padding: 0.5rem !important; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Title and description
 st.title("🎬 OpenClip")
@@ -814,7 +785,7 @@ with st.sidebar:
     if new_lang != current_lang:
         data['ui_language'] = new_lang
         st.rerun()
-    
+
     st.divider()
     
     # Video input options
@@ -950,12 +921,8 @@ with st.sidebar:
     resolved_llm_model = (provider_settings['model'] or provider_default_model).strip()
     resolved_llm_base_url = (provider_settings['base_url'] or provider_default_base_url).strip()
 
-    if resolved_llm_model:
-        st.caption(f"ℹ️ Model: {resolved_llm_model}")
-    else:
-        st.caption(f"ℹ️ {t['llm_model_unset']}")
-    if resolved_llm_base_url:
-        st.caption(f"ℹ️ Base URL: {resolved_llm_base_url}")
+    if not resolved_llm_model:
+        st.warning(t['llm_model_unset'])
 
     # API key input (optional, since it can be set via environment variable)
     api_key_env_var = API_KEY_ENV_VARS.get(llm_provider, "QWEN_API_KEY")

@@ -209,6 +209,30 @@ uv run python -m streamlit run streamlit_app.py
 
 应用启动后，打开浏览器访问显示的 URL（通常是 `http://localhost:8501`）。
 
+<details>
+<summary>局域网/共享机器模式</summary>
+
+如果需要从同一局域网内的其他设备访问 Streamlit，并让「Open in Editor」打开可访问的 Clip Editor 地址：
+
+```bash
+export OPENCLIP_EDITOR_BASE_URL=http://HOST_LAN_IP:8765
+# 可选：显式指定编辑器服务监听地址与端口
+export OPENCLIP_EDITOR_HOST=0.0.0.0
+export OPENCLIP_EDITOR_PORT=8765
+
+uv run python -m streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+可用以下命令查看 Mac 主机的局域网 IP：
+
+```bash
+ipconfig getifaddr en0
+```
+
+在另一台同网设备上打开 `http://HOST_LAN_IP:8501`。Clip Editor 项目地址形如 `http://HOST_LAN_IP:8765/projects/PROJECT_ID`。
+
+</details>
+
 **使用流程：**
 1. 在侧边栏选择输入类型（视频 URL 或本地文件）
 2. 配置处理选项（LLM 提供商、`LLM Model`、`LLM Base URL`、Cookie 模式等）

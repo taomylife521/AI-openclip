@@ -209,6 +209,30 @@ uv run python -m streamlit run streamlit_app.py
 
 Once the app starts, open your browser and visit the displayed URL (typically `http://localhost:8501`).
 
+<details>
+<summary>LAN/shared-machine mode</summary>
+
+To access Streamlit from another device on the same network and make "Open in Editor" use a reachable Clip Editor URL:
+
+```bash
+export OPENCLIP_EDITOR_BASE_URL=http://HOST_LAN_IP:8765
+# Optional: explicitly set the editor service bind address and port
+export OPENCLIP_EDITOR_HOST=0.0.0.0
+export OPENCLIP_EDITOR_PORT=8765
+
+uv run python -m streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+On macOS, find the host machine's LAN IP with:
+
+```bash
+ipconfig getifaddr en0
+```
+
+Open `http://HOST_LAN_IP:8501` from another device on the same network. Clip Editor project URLs look like `http://HOST_LAN_IP:8765/projects/PROJECT_ID`.
+
+</details>
+
 **Usage Flow:**
 1. Select input type (Video URL or Local File) in the sidebar
 2. Configure processing options (`LLM provider`, `LLM Model`, `LLM Base URL`, cookie mode, etc.)

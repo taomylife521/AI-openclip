@@ -12,6 +12,7 @@ import time
 import webbrowser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -21,6 +22,9 @@ RUNTIME_DIR = Path('.omx/runtime')
 RUNTIME_FILE = RUNTIME_DIR / 'editor-service.json'
 LOCK_FILE = RUNTIME_DIR / 'editor-service.lock'
 HEALTH_PATH = '/healthz'
+EDITOR_BASE_URL_ENV = 'OPENCLIP_EDITOR_BASE_URL'
+EDITOR_HOST_ENV = 'OPENCLIP_EDITOR_HOST'
+EDITOR_PORT_ENV = 'OPENCLIP_EDITOR_PORT'
 
 
 def _ensure_runtime_dir() -> None:
@@ -88,6 +92,54 @@ def _normalized_path(value: str | Path) -> str:
     return str(Path(value).resolve())
 
 
+def _parse_editor_port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise ValueError(f'{EDITOR_PORT_ENV} must be an integer') from exc
+    if port <= 0 or port > 65535:
+        raise ValueError(f'{EDITOR_PORT_ENV} must be between 1 and 65535')
+    return port
+
+
+def _configured_editor_base_url() -> str | None:
+    base_url = os.environ.get(EDITOR_BASE_URL_ENV, '').strip()
+    if not base_url:
+        return None
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise ValueError(f'{EDITOR_BASE_URL_ENV} must be an http(s) URL with a host')
+    return base_url.rstrip('/')
+
+
+def _editor_runtime_config(host: str) -> tuple[str, int | None, str | None]:
+    base_url = _configured_editor_base_url()
+    env_host = os.environ.get(EDITOR_HOST_ENV, '').strip()
+    bind_host = env_host or ('0.0.0.0' if base_url else host)
+
+    env_port = os.environ.get(EDITOR_PORT_ENV, '').strip()
+    if env_port:
+        return bind_host, _parse_editor_port(env_port), base_url
+
+    if base_url:
+        parsed = urlparse(base_url)
+        try:
+            base_url_port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f'{EDITOR_BASE_URL_ENV} must include a valid port when a port is specified') from exc
+        if base_url_port:
+            return bind_host, base_url_port, base_url
+
+    return bind_host, None, base_url
+
+
+def _project_url(project_id: str, *, base_url: str | None, host: str, port: int) -> str:
+    if base_url:
+        return f'{base_url}/projects/{project_id}'
+    return f'http://{host}:{port}/projects/{project_id}'
+
+
 def ensure_editor_service(
     project_id: str,
     *,
@@ -98,24 +150,28 @@ def ensure_editor_service(
 ) -> str:
     normalized_projects_root = _normalized_path(projects_root)
     normalized_jobs_dir = _normalized_path(jobs_dir)
+    bind_host, configured_port, public_base_url = _editor_runtime_config(host)
 
     with _runtime_lock():
         record = _load_runtime_record()
         port = int(record.get('port') or 0)
         pid = record.get('pid')
+        same_port = configured_port is None or port == configured_port
         same_runtime = (
             record.get('projects_root') == normalized_projects_root
             and record.get('jobs_dir') == normalized_jobs_dir
+            and record.get('host') == bind_host
+            and same_port
         )
-        if port and same_runtime and _is_process_alive(pid) and _healthy(host, port):
-            url = f'http://{host}:{port}/projects/{project_id}'
+        if port and same_runtime and _is_process_alive(pid) and _healthy(bind_host, port):
+            url = _project_url(project_id, base_url=public_base_url, host=bind_host, port=port)
             if open_browser:
                 webbrowser.open_new_tab(url)
             return url
 
         last_error = None
         for _ in range(2):
-            port = _pick_free_port(host)
+            port = configured_port or _pick_free_port(bind_host)
             uv_binary = shutil.which('uv')
             if uv_binary:
                 cmd = [
@@ -125,7 +181,7 @@ def ensure_editor_service(
                     '-m',
                     'editor_runtime',
                     '--host',
-                    host,
+                    bind_host,
                     '--port',
                     str(port),
                     '--projects-root',
@@ -139,7 +195,7 @@ def ensure_editor_service(
                     '-m',
                     'editor_runtime',
                     '--host',
-                    host,
+                    bind_host,
                     '--port',
                     str(port),
                     '--projects-root',
@@ -151,15 +207,15 @@ def ensure_editor_service(
             record = {
                 'pid': process.pid,
                 'port': port,
-                'host': host,
+                'host': bind_host,
                 'started_at': time.time(),
                 'projects_root': normalized_projects_root,
                 'jobs_dir': normalized_jobs_dir,
             }
             _save_runtime_record(record)
             for _ in range(50):
-                if _healthy(host, port):
-                    url = f'http://{host}:{port}/projects/{project_id}'
+                if _healthy(bind_host, port):
+                    url = _project_url(project_id, base_url=public_base_url, host=bind_host, port=port)
                     if open_browser:
                         webbrowser.open_new_tab(url)
                     return url

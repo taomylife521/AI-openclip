@@ -20,6 +20,7 @@ const editorEndpoints = [
   'GET /api/projects/:project_id',
   'PATCH /api/projects/:project_id/clips/:clip_id/bounds',
   'PATCH /api/projects/:project_id/clips/:clip_id/subtitle',
+  'PATCH /api/projects/:project_id/clips/:clip_id/translated-subtitle',
   'PATCH /api/projects/:project_id/clips/:clip_id/cover-title',
   'POST /api/projects/:project_id/clips/:clip_id/rerender/boundary',
   'POST /api/projects/:project_id/clips/:clip_id/rerender/subtitles',
@@ -33,6 +34,8 @@ const emptyDirtyState = {
   boundsDirty: false,
   speedDirty: false,
   boundaryDirty: false,
+  sourceSubtitlesDirty: false,
+  translatedSubtitlesDirty: false,
   subtitlesDirty: false,
   coverTitleDirty: false,
   coverNeedsRefresh: false,
@@ -68,9 +71,9 @@ const languageStorageKey = 'openclip-editor-language'
 function loadInitialTheme(): EditorTheme {
   try {
     const storedTheme = window.localStorage.getItem(themeStorageKey)
-    return storedTheme === 'light' ? 'light' : 'dark'
+    return storedTheme === 'dark' ? 'dark' : 'light'
   } catch {
-    return 'dark'
+    return 'light'
   }
 }
 
@@ -115,6 +118,13 @@ function buildPreviewWindow(clip?: ClipDraft, projectSourceVideoUrl?: string): P
     end: clip.end,
     sourceVideoUrl: clip.sourceVideoUrl ?? projectSourceVideoUrl,
   }
+}
+
+function subtitleTextareaRows(text: string): number {
+  const estimatedRows = text.split('\n').reduce((rows, line) => {
+    return rows + Math.max(1, Math.ceil(Math.max(line.length, 1) / 56))
+  }, 0)
+  return Math.max(2, Math.min(3, estimatedRows))
 }
 
 function App() {
@@ -463,6 +473,21 @@ function App() {
       })
       await assertOk(response, 'Saving subtitle override')
     }
+    if (serializeSubtitleSegments(savedClip.translatedSubtitleSegments) !== serializeSubtitleSegments(clip.translatedSubtitleSegments)) {
+      const response = await fetch(`/api/projects/${projectId}/clips/${clip.id}/translated-subtitle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subtitle_text: clip.translatedSubtitleText,
+          subtitle_segments: clip.translatedSubtitleSegments.map((segment) => ({
+            start_time: segment.startTime,
+            end_time: segment.endTime,
+            text: segment.text,
+          })),
+        }),
+      })
+      await assertOk(response, 'Saving translated subtitle override')
+    }
     if (savedClip.coverTitle !== clip.coverTitle) {
       const response = await fetch(`/api/projects/${projectId}/clips/${clip.id}/cover-title`, {
         method: 'PATCH',
@@ -651,19 +676,32 @@ function App() {
     ? t(locale, 'coverRerenderStarted')
     : null
   const subtitleCueTextareaLabel = (index: number) => t(locale, 'subtitleCueTextareaLabel', { index })
+  const translatedSubtitleCueTextareaLabel = (index: number) => t(locale, 'translatedSubtitleCueTextareaLabel', { index })
+  const translatedSubtitleByIndex = new Map(
+    activeClip.translatedSubtitleSegments.map((segment) => [segment.index, segment]),
+  )
 
-  function updateSubtitleSegmentText(index: number, text: string) {
+  function updateSubtitleSegmentText(index: number, text: string, track: 'original' | 'translated' = 'original') {
     if (!activeClip) return
     updateClip(activeClip.id, (clip) => {
-      const subtitleSegments = clip.subtitleSegments.map((segment) => (
+      const currentSegments = track === 'translated' ? clip.translatedSubtitleSegments : clip.subtitleSegments
+      const nextSegments = currentSegments.map((segment) => (
         segment.index === index
           ? { ...segment, text }
           : segment
       ))
+      if (track === 'translated') {
+        return {
+          ...clip,
+          translatedSubtitleSegments: nextSegments,
+          translatedSubtitleText: subtitleSegmentsToText(nextSegments),
+          hasTranslatedSubtitles: nextSegments.length > 0,
+        }
+      }
       return {
         ...clip,
-        subtitleSegments,
-        subtitleText: subtitleSegmentsToText(subtitleSegments),
+        subtitleSegments: nextSegments,
+        subtitleText: subtitleSegmentsToText(nextSegments),
       }
     })
   }
@@ -857,24 +895,45 @@ function App() {
             <div className="subtitle-editor-layout">
               <article className="subtitle-editor-layout__controls">
                 <div className="field">
-                  <span>{t(locale, 'subtitleOverride')}</span>
-                  <div className="subtitle-segment-list" aria-label={t(locale, 'subtitleOverride')}>
-                    {activeClip.subtitleSegments.length > 0 ? activeClip.subtitleSegments.map((segment: SubtitleSegmentDraft) => (
-                      <div key={`${segment.index}-${segment.startTime}-${segment.endTime}`} className="subtitle-segment-card">
-                        <div className="subtitle-segment-card__row">
-                          <textarea
-                            aria-label={subtitleCueTextareaLabel(segment.index)}
-                            value={segment.text}
-                            disabled={loading}
-                            onChange={(event) => updateSubtitleSegmentText(segment.index, event.currentTarget.value)}
-                            rows={Math.max(1, Math.min(3, segment.text.split('\n').length || 1))}
-                          />
-                          <code className="subtitle-segment-card__time">{segment.startTime} → {segment.endTime}</code>
-                        </div>
-                      </div>
-                    )) : (
-                      <p className="muted">{t(locale, 'noSubtitleSegmentsAvailable')}</p>
-                    )}
+                  <span>{activeClip.hasTranslatedSubtitles ? t(locale, 'translatedSubtitleTrack') : t(locale, 'subtitleOverride')}</span>
+                  <div className={`subtitle-cue-table ${activeClip.hasTranslatedSubtitles ? 'subtitle-cue-table--bilingual' : ''}`} aria-label={t(locale, 'subtitleOverride')}>
+                    <div className="subtitle-cue-table__header" aria-hidden="true">
+                      <span>{t(locale, 'timeRange')}</span>
+                      <span>{t(locale, 'subtitleOverride')}</span>
+                      {activeClip.hasTranslatedSubtitles ? <span>{t(locale, 'translatedSubtitleTrack')}</span> : null}
+                    </div>
+                    <div className="subtitle-segment-list">
+                      {activeClip.subtitleSegments.length > 0 ? activeClip.subtitleSegments.map((segment: SubtitleSegmentDraft) => {
+                        const translatedSegment = translatedSubtitleByIndex.get(segment.index)
+                        return (
+                          <div key={`${segment.index}-${segment.startTime}-${segment.endTime}`} className="subtitle-segment-card subtitle-segment-card--table">
+                            <code className="subtitle-segment-card__time">{segment.startTime} → {segment.endTime}</code>
+                            <textarea
+                              aria-label={subtitleCueTextareaLabel(segment.index)}
+                              value={segment.text}
+                              disabled={loading}
+                              onChange={(event) => updateSubtitleSegmentText(segment.index, event.currentTarget.value, 'original')}
+                              rows={subtitleTextareaRows(segment.text)}
+                            />
+                            {activeClip.hasTranslatedSubtitles ? (
+                              translatedSegment ? (
+                                <textarea
+                                  aria-label={translatedSubtitleCueTextareaLabel(segment.index)}
+                                  value={translatedSegment.text}
+                                  disabled={loading}
+                                  onChange={(event) => updateSubtitleSegmentText(segment.index, event.currentTarget.value, 'translated')}
+                                  rows={subtitleTextareaRows(translatedSegment.text)}
+                                />
+                              ) : (
+                                <p className="muted subtitle-segment-card__missing">{t(locale, 'noTranslatedSubtitleSegmentsAvailable')}</p>
+                              )
+                            ) : null}
+                          </div>
+                        )
+                      }) : (
+                        <p className="muted">{t(locale, 'noSubtitleSegmentsAvailable')}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <button type="button" className="action-button action-button--secondary" disabled={loading || !activeDirtyState.subtitlesDirty || Boolean(subtitleRerenderMessage)} onClick={() => void handleQueue('subtitles')}>{getQueueButtonLabel('subtitles')}</button>

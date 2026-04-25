@@ -27,8 +27,14 @@ const manifestProject = {
         { start_time: '00:00:00,000', end_time: '00:00:02,500', text: 'Loaded subtitle' },
         { start_time: '00:00:02,500', end_time: '00:00:05,000', text: 'Second loaded line' },
       ],
+      translated_subtitle_segments: [
+        { start_time: '00:00:00,000', end_time: '00:00:02,500', text: '已加载字幕' },
+        { start_time: '00:00:02,500', end_time: '00:00:05,000', text: '第二行译文' },
+      ],
       subtitle_recipe: { override_text: 'Loaded subtitle' },
       effective_subtitle_text: 'Loaded subtitle\nSecond loaded line',
+      translated_subtitle_text: '已加载字幕\n第二行译文',
+      has_translated_subtitles: true,
       has_manual_subtitle_override: true,
       cover_recipe: { text: 'Loaded cover' },
       current_composed_clip_url: '/api/projects/proj-real/media/clips_post_processed/clip-real-1.mp4',
@@ -51,8 +57,11 @@ const manifestProject = {
       subtitle_segments: [
         { start_time: '00:00:00,000', end_time: '00:00:03,000', text: 'Second subtitle' },
       ],
+      translated_subtitle_segments: [],
       subtitle_recipe: { override_text: 'Second subtitle' },
       effective_subtitle_text: 'Second subtitle',
+      translated_subtitle_text: '',
+      has_translated_subtitles: false,
       has_manual_subtitle_override: false,
       cover_recipe: { text: 'Second cover' },
       current_composed_clip_url: '/api/projects/proj-real/media/clips_post_processed/clip-real-2.mp4',
@@ -133,14 +142,16 @@ describe('OpenClip editor shell', () => {
     expect(screen.getByText(zh('loadedManifestProjectStatus', { projectName: 'Manifest Project' }))).toBeInTheDocument()
     expect(screen.getByDisplayValue('Loaded subtitle')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Second loaded line')).toBeInTheDocument()
-    expect(screen.getByText('00:00:00,000 → 00:00:02,500')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('已加载字幕')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('第二行译文')).toBeInTheDocument()
+    expect(screen.getAllByText('00:00:00,000 → 00:00:02,500')).toHaveLength(1)
     expect(screen.getByRole('article', { name: zh('postProcessedPreview') })).toBeInTheDocument()
     expect(screen.getByRole('article', { name: zh('horizontalCoverPreview') })).toBeInTheDocument()
     expect(screen.getByRole('article', { name: zh('verticalCoverPreview') })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: zh('openDiagnosticsDrawer') })).toBeInTheDocument()
     await waitFor(() => expect(getTimelinePreviewVideo()?.currentTime).toBe(5))
-    expect(document.querySelector('.shell[data-theme="dark"]')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: zh('switchToLightTheme') })).toBeInTheDocument()
+    expect(document.querySelector('.shell[data-theme="light"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: zh('switchToDarkTheme') })).toBeInTheDocument()
   })
 
   it('opens and closes diagnostics in a right-side drawer', async () => {
@@ -172,12 +183,12 @@ describe('OpenClip editor shell', () => {
 
     await screen.findByRole('heading', { name: 'Loaded Clip' })
     expect(screen.getByRole('heading', { name: zh('subtitleEditor') })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: zh('switchToLightTheme') })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: zh('switchToDarkTheme') })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'EN' }))
 
     expect(screen.getByRole('heading', { name: en('subtitleEditor') })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: en('switchToLightTheme') })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: en('switchToDarkTheme') })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: en('openDiagnosticsDrawer') })).toBeInTheDocument()
     expect(localStorageMock.getItem('openclip-editor-language')).toBe('en')
 
@@ -208,19 +219,54 @@ describe('OpenClip editor shell', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('toggles to light theme and persists the preference', async () => {
+  it('saves translated subtitle edits before queueing subtitle rerender', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => manifestProject })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          subtitle_segments: [
+            { start_time: '00:00:00,000', end_time: '00:00:02,500', text: '已更新译文' },
+            { start_time: '00:00:02,500', end_time: '00:00:05,000', text: '第二行译文' },
+          ],
+        })
+        return { ok: true, json: async () => ({}) }
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ job_id: 'job-translated-1' }) })
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/jobs/job-translated-1') {
+          return new Promise(() => {})
+        }
+        throw new Error(`Unexpected fetch in test: ${url}`)
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Loaded Clip' })
+    const translatedField = screen.getByLabelText(zh('translatedSubtitleCueTextareaLabel', { index: 1 }))
+    await user.clear(translatedField)
+    await user.type(translatedField, '已更新译文')
+    await user.click(screen.getByRole('button', { name: zh('queueRerender', { operation: zh('operationSubtitle') }) }))
+
+    expect(screen.getByRole('button', { name: zh('rerenderInProgress', { operation: zh('operationSubtitle') }) })).toBeDisabled()
+  })
+
+  it('toggles to dark theme and persists the preference', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifestProject }))
     const user = userEvent.setup()
 
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Loaded Clip' })
-    await user.click(screen.getByRole('button', { name: zh('switchToLightTheme') }))
+    await user.click(screen.getByRole('button', { name: zh('switchToDarkTheme') }))
 
-    expect(document.querySelector('.shell[data-theme="light"]')).toBeInTheDocument()
-    expect(localStorageMock.getItem('openclip-editor-theme')).toBe('light')
-    expect(document.documentElement.style.colorScheme).toBe('light')
-    expect(screen.getByRole('button', { name: zh('switchToDarkTheme') })).toBeInTheDocument()
+    expect(document.querySelector('.shell[data-theme="dark"]')).toBeInTheDocument()
+    expect(localStorageMock.getItem('openclip-editor-theme')).toBe('dark')
+    expect(document.documentElement.style.colorScheme).toBe('dark')
+    expect(screen.getByRole('button', { name: zh('switchToLightTheme') })).toBeInTheDocument()
   })
 
   it('uses the saved light theme preference on first render', async () => {
@@ -401,7 +447,6 @@ describe('OpenClip editor shell', () => {
     fireEvent.change(startSlider, { target: { value: '6' } })
 
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByRole('button', { name: /重新生成/ })).toBeNull()
   })
 
   it('reloads regenerated subtitle cues immediately after queueing a boundary rerender', async () => {

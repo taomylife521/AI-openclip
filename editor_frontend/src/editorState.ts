@@ -14,6 +14,9 @@ export interface ClipDraft {
   speed: number
   subtitleText: string
   subtitleSegments: SubtitleSegmentDraft[]
+  translatedSubtitleText: string
+  translatedSubtitleSegments: SubtitleSegmentDraft[]
+  hasTranslatedSubtitles: boolean
   coverTitle: string
   renderStatus: 'Ready' | 'Needs sync' | 'Rendering' | 'Recoverable' | 'Error'
   updatedAt: string
@@ -47,6 +50,8 @@ export interface DirtyState {
   boundsDirty: boolean
   speedDirty: boolean
   boundaryDirty: boolean
+  sourceSubtitlesDirty: boolean
+  translatedSubtitlesDirty: boolean
   subtitlesDirty: boolean
   coverTitleDirty: boolean
   coverNeedsRefresh: boolean
@@ -104,6 +109,9 @@ interface ManifestClip {
   subtitle_recipe?: ManifestClipRecipe
   subtitle_segments?: ManifestSubtitleSegment[]
   effective_subtitle_text?: string
+  translated_subtitle_segments?: ManifestSubtitleSegment[]
+  translated_subtitle_text?: string
+  has_translated_subtitles?: boolean
   has_manual_subtitle_override?: boolean
   cover_recipe?: ManifestClipRecipe
   recovery?: ManifestRecovery
@@ -216,13 +224,17 @@ export function clampBoundsWithinRange(
 export function getDirtyState(savedClip: ClipDraft, draftClip: ClipDraft): DirtyState {
   const boundsDirty = savedClip.start !== draftClip.start || savedClip.end !== draftClip.end
   const speedDirty = savedClip.speed !== draftClip.speed
-  const subtitlesDirty = serializeSubtitleSegments(savedClip.subtitleSegments) !== serializeSubtitleSegments(draftClip.subtitleSegments)
+  const sourceSubtitlesDirty = serializeSubtitleSegments(savedClip.subtitleSegments) !== serializeSubtitleSegments(draftClip.subtitleSegments)
+  const translatedSubtitlesDirty = serializeSubtitleSegments(savedClip.translatedSubtitleSegments) !== serializeSubtitleSegments(draftClip.translatedSubtitleSegments)
+  const subtitlesDirty = sourceSubtitlesDirty || translatedSubtitlesDirty
   const coverTitleDirty = savedClip.coverTitle !== draftClip.coverTitle
   return {
     hasChanges: boundsDirty || speedDirty || subtitlesDirty || coverTitleDirty,
     boundsDirty,
     speedDirty,
     boundaryDirty: boundsDirty || speedDirty,
+    sourceSubtitlesDirty,
+    translatedSubtitlesDirty,
     subtitlesDirty,
     coverTitleDirty,
     coverNeedsRefresh: Boolean(draftClip.coverDirty) || boundsDirty || speedDirty || coverTitleDirty,
@@ -297,7 +309,9 @@ export function projectFromManifest(manifest: EditorManifest): EditorProject {
     clips: (manifest.clips ?? []).map((clip, index) => {
       const coverDirty = Boolean(clip.metadata?.cover_dirty)
       const subtitleSegments = mapSubtitleSegments(clip.subtitle_segments)
+      const translatedSubtitleSegments = mapSubtitleSegments(clip.translated_subtitle_segments)
       const subtitleText = subtitleSegmentsToText(subtitleSegments) || (clip.effective_subtitle_text ?? clip.subtitle_recipe?.override_text ?? '')
+      const translatedSubtitleText = subtitleSegmentsToText(translatedSubtitleSegments) || (clip.translated_subtitle_text ?? '')
       return {
         id: clip.clip_id,
         order: index + 1,
@@ -316,6 +330,9 @@ export function projectFromManifest(manifest: EditorManifest): EditorProject {
         speed: Number(clip.speed ?? 1),
         subtitleText,
         subtitleSegments,
+        translatedSubtitleText,
+        translatedSubtitleSegments,
+        hasTranslatedSubtitles: Boolean(clip.has_translated_subtitles),
         coverTitle: clip.cover_recipe?.text ?? clip.title,
         renderStatus: mapRenderStatus(clip.recovery, coverDirty),
         updatedAt: clip.updated_at ?? clip.recovery?.last_reconciled_at ?? manifest.updated_at ?? 'pending manifest sync',
